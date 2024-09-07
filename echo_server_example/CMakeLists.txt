@@ -4,14 +4,15 @@ project(networking_suite)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_executable(echo_server src/server.cpp common/Logger.cpp)
+add_executable(echo_server src/server.cpp)
 
 
 target_include_directories(echo_server PRIVATE
-        common
+        ${CMAKE_SOURCE_DIR}/common/include
 )
 
 target_link_libraries(echo_server PRIVATE
+        common
         ${COMMON_LINK_LIBRARIES}
 )
 
@@ -21,15 +22,15 @@ set_target_properties(echo_server PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
-add_executable(echo_client src/client.cpp
-        common/Logger.cpp)
+add_executable(echo_client src/client.cpp)
 
 
 target_include_directories(echo_client PRIVATE
-        common
+        ${CMAKE_SOURCE_DIR}/common/include
 )
 
 target_link_libraries(echo_client PRIVATE
+        common
         ${COMMON_LINK_LIBRARIES}
 )
 
