@@ -52,9 +52,9 @@ public:
         }
 
         void write(const LogEntry& entry) override {
-            /*if (m_logFile.tellp() >= m_maxFileSize) {
-                //rotateLogFile();
-            }*/
+            if (m_logFile.tellp() >= m_maxFileSize) {
+                rotateLogFile();
+            }
             m_logFile << formatLogEntry(entry) << std::endl;
         }
 

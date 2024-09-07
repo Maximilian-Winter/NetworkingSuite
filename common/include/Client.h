@@ -31,27 +31,34 @@ public:
     }
 
     void connectTCP(const std::string& host, const std::string& port,
-                    const TCPMessageHandler::MessageCallback& message_handler,
-                    const std::function<void(std::shared_ptr<TCPNetworkUtility::Session>)>& close_callback,
-                    const std::function<void(std::error_code, std::shared_ptr<TCPNetworkUtility::Session>)>& connect_callback) {
+                const std::function<void(std::error_code, std::shared_ptr<TCPNetworkUtility::Session>)>& connect_callback,
+                    const std::shared_ptr<TCPMessageHandler>& message_handler,
+                    const std::function<void(std::shared_ptr<TCPNetworkUtility::Session>)>& close_callback) {
 
-
+        auto messageHandling = [message_handler](std::shared_ptr<TCPNetworkUtility::Session> session, ByteVector message)
+        {
+            message_handler->handleMessage(session, message);
+        };
         TCPNetworkUtility::connect(
             thread_pool_->get_io_context(), host, port, framing_,
             connect_callback,
-            message_handler,
+            messageHandling,
             close_callback
         );
     }
 
     void connectUDP(const std::string& host, const std::string& port,
-                    const UDPMessageHandler::MessageCallback& message_handler,
-                    const std::function<void(std::shared_ptr<UDPNetworkUtility::Connection>)>& close_callback,
-                    const std::function<void(std::error_code, std::shared_ptr<UDPNetworkUtility::Connection>)>& connect_callback) {
+                    const std::function<void(std::error_code, std::shared_ptr<UDPNetworkUtility::Connection>)>& connect_callback,
+                    const std::shared_ptr<UDPMessageHandler>& message_handler,
+                    const std::function<void(std::shared_ptr<UDPNetworkUtility::Connection>)>& close_callback) {
+        auto messageHandling = [message_handler](std::shared_ptr<UDPNetworkUtility::Connection> connection, ByteVector message)
+        {
+            message_handler->handleMessage(connection, message);
+        };
         UDPNetworkUtility::connect(
             thread_pool_->get_io_context(), host, port, framing_,
             connect_callback,
-            message_handler,
+            messageHandling,
             close_callback
         );
     }

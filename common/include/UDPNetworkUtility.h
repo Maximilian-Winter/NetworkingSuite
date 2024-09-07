@@ -15,7 +15,7 @@ public:
     class Connection : public std::enable_shared_from_this<Connection> {
     private:
         asio::ip::udp::socket socket_;
-
+        std::string connectionUuid_;
         asio::strand<asio::io_context::executor_type> strand_;
         std::shared_ptr<BufferPool> buffer_pool_;
         LockFreeQueue<ByteVector*, 1024> send_queue_;
@@ -29,7 +29,8 @@ public:
             : socket_(io_context, asio::ip::udp::endpoint(asio::ip::udp::v4(), 0)), resolver(io_context),
               strand_(asio::make_strand(io_context)),
               buffer_pool_(std::make_shared<BufferPool>(8192)),
-              message_framing_(std::move(framing))
+              message_framing_(std::move(framing)),
+        connectionUuid_(Utilities::generateUuid())
         {
         }
 
@@ -45,6 +46,11 @@ public:
         }
 
         asio::ip::udp::socket& socket() { return socket_; }
+
+        std::string getConnectionUuid()
+        {
+            return connectionUuid_;
+        }
 
         void send(const ByteVector& message) {
             if (is_closed()) {
@@ -84,7 +90,7 @@ public:
             receive_buffer->resize(buffer_pool_->getBufferSize());
             std::string client_key = endpoint.address().to_string() + ":" +
                                              std::to_string(endpoint.port());
-            LOG_INFO("Remote endpoint: %s", client_key.c_str());
+            LOG_DEBUG("Remote endpoint: %s", client_key.c_str());
 
             socket_.async_receive_from(
                 asio::buffer(*receive_buffer), endpoint,

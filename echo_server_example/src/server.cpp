@@ -3,63 +3,84 @@
 //
 // EchoServer.cpp
 #include "Server.h"
-#include "Config.h"
-#include "AsioThreadPool.h"
 #include "MessageFraming.h"
+#include "MessageHandler.h"
+#include "Config.h"
 #include <iostream>
-#include <csignal>
 
-std::atomic<bool> running(true);
+class EchoServer {
+public:
+    explicit EchoServer(const Config& config)
+        : thread_pool_(std::make_shared<AsioThreadPool>()),
+          framing_(std::make_shared<MagicNumberFraming>(0x12345678, 0x87654321)),
+          server_(thread_pool_, framing_, config) {
 
-void signal_handler(int signal) {
-    std::cout << "Caught signal " << signal << ". Shutting down..." << std::endl;
-    running = false;
-}
+        auto tcp_handler = std::make_shared<TCPMessageHandler>();
+        auto udp_handler = std::make_shared<UDPMessageHandler>();
+
+        tcp_handler->registerHandler(1, [this](const std::shared_ptr<TCPNetworkUtility::Session>& session, const ByteVector& data) {
+            handleEcho(session, data);
+        });
+
+        udp_handler->registerHandler(1, [this](const std::shared_ptr<UDPNetworkUtility::Connection>& connection, const ByteVector& data) {
+            handleEcho(connection, data);
+        });
+
+        server_.addTCPPort(8080,
+            [](std::shared_ptr<TCPNetworkUtility::Session> session) {
+                std::cout << "New TCP connection: " << session->getSessionUuid() << std::endl;
+            },
+            tcp_handler,
+            [](std::shared_ptr<TCPNetworkUtility::Session> session) {
+                std::cout << "TCP connection closed: " << session->getSessionUuid() << std::endl;
+            }
+        );
+
+        server_.addUDPPort(8081,
+            [](std::shared_ptr<UDPNetworkUtility::Connection> connection) {
+                std::cout << "New UDP connection: " << connection->getConnectionUuid() << std::endl;
+            },
+            udp_handler,
+            [](std::shared_ptr<UDPNetworkUtility::Connection> connection) {
+                std::cout << "UDP connection closed: " << connection->getConnectionUuid() << std::endl;
+            }
+        );
+    }
+
+    void start() {
+        server_.start();
+    }
+
+    void stop() {
+        server_.stop();
+    }
+
+private:
+
+    void handleEcho(const std::shared_ptr<TCPNetworkUtility::Session>& endpoint, const ByteVector& data) {
+        std::cout << "Received: " << std::string(data.begin(), data.end()) << std::endl;
+        endpoint->write(data);  // Echo back the received data
+    }
+    void handleEcho(const std::shared_ptr<UDPNetworkUtility::Connection>& endpoint, const ByteVector& data) {
+        std::cout << "Received: " << std::string(data.begin(), data.end()) << std::endl;
+        endpoint->send(data);  // Echo back the received data
+    }
+    std::shared_ptr<AsioThreadPool> thread_pool_;
+    std::shared_ptr<MessageFraming> framing_;
+    Server server_;
+};
 
 int main() {
-    signal(SIGINT, signal_handler);
-
     Config config;
-    if (!config.load("server_config.json")) {
-        std::cerr << "Failed to load configuration." << std::endl;
-        return 1;
-    }
+    // Load configuration if needed
+    // config.load("server_config.json");
 
-    auto thread_pool = std::make_shared<AsioThreadPool>(1);
-    auto framing = std::make_shared<MagicNumberFraming>(0x12345678, 0x87654321);
-
-    Server server(thread_pool, framing, config);
-
-    server.addTCPPort(8080,
-        [](const std::shared_ptr<TCPNetworkUtility::Session>& session, const ByteVector& data) {
-            std::cout << "Received TCP message: " << std::string(data.begin(), data.end()) << std::endl;
-            session->write(data);  // Echo back the received data
-        },
-        [](const std::shared_ptr<TCPNetworkUtility::Session>& session) {
-            std::cout << "TCP session closed." << std::endl;
-        }
-    );
-
-    server.addUDPPort(8081,
-        [](const std::shared_ptr<UDPNetworkUtility::Connection>& connection, const ByteVector& data) {
-            std::cout << "Received UDP message: " << std::string(data.begin(), data.end()) << std::endl;
-            connection->send(data);  // Echo back the received data
-        },
-        [](const std::shared_ptr<UDPNetworkUtility::Connection>& connection) {
-            std::cout << "UDP connection closed." << std::endl;
-        }
-    );
-
+    EchoServer server(config);
     server.start();
 
-    std::cout << "Echo server started. Press Ctrl+C to stop." << std::endl;
+    std::cout << "Echo server started. Press Enter to exit." << std::endl;
+    std::cin.get();
 
-    while (running) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    std::cout << "Stopping server..." << std::endl;
     server.stop();
-
     return 0;
 }

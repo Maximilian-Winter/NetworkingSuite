@@ -7,6 +7,7 @@
 #include "BufferPool.h"
 #include "Logger.h"
 #include "MessageFraming.h"
+#include "Utilities.h"
 
 class TCPNetworkUtility {
 public:
@@ -14,7 +15,7 @@ public:
     class Session : public std::enable_shared_from_this<Session> {
     private:
         asio::ip::tcp::socket socket_;
-
+        std::string sessionUuid_;
         asio::strand<asio::io_context::executor_type> strand_;
         std::shared_ptr<BufferPool> buffer_pool_;
         LockFreeQueue<ByteVector*, 1024> write_queue_;
@@ -29,7 +30,9 @@ public:
             : socket_(io_context),
               strand_(asio::make_strand(io_context)),
               buffer_pool_(std::make_shared<BufferPool>(8192)),
-              message_framing_(std::move(framing)) {
+              message_framing_(std::move(framing)),
+        sessionUuid_(Utilities::generateUuid())
+        {
             read_buffer_.reserve(buffer_pool_->getBufferSize() + message_framing_->getMaxFramingOverhead());
         }
 
@@ -43,6 +46,11 @@ public:
         bool is_closed() const { return is_closed_.load(std::memory_order_acquire); }
 
         asio::ip::tcp::socket& socket() { return socket_; }
+
+        std::string getSessionUuid()
+        {
+            return sessionUuid_;
+        }
 
         void write(const ByteVector& message) {
             if (is_closed()) {
@@ -159,7 +167,7 @@ public:
         }
 
     };
-    using MessageCallback = std::function<void(const std::shared_ptr<Session>&, const ByteVector&)>;
+
     static std::shared_ptr<Session> createSession(asio::io_context& io_context, asio::ip::tcp::socket& socket, const std::shared_ptr<MessageFraming>& framing) {
         auto session = std::make_shared<Session>(io_context, framing);
         session->socket() = std::move(socket);
@@ -172,7 +180,7 @@ public:
         const std::string& port,
         const std::shared_ptr<MessageFraming>& framing,
         const std::function<void(std::error_code, std::shared_ptr<Session>)>& callback,
-        const MessageCallback& messageCallback,
+        const std::function<void(std::shared_ptr<Session> session, ByteVector message)>& messageCallback,
         const std::function<void(std::shared_ptr<Session>)>& closedCallback) {
 
         auto session = std::make_shared<Session>(io_context, framing);
