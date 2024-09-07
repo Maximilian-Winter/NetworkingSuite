@@ -7,8 +7,11 @@
 #include <vector>
 #include <cstdint>
 #include <stdexcept>
+#include <memory>
+#include <nlohmann/json.hpp>
 
 using ByteVector = std::vector<uint8_t>;
+using json = nlohmann::json;
 
 class MessageFraming {
 public:
@@ -25,6 +28,19 @@ public:
 
     // Get the maximum overhead added by framing
     virtual size_t getMaxFramingOverhead() const = 0;
+
+    // Set connection-specific data
+    void setConnectionData(const json& data) {
+        connectionData_ = std::make_shared<json>(data);
+    }
+
+    // Get connection-specific data
+    std::shared_ptr<json> getConnectionData() const {
+        return connectionData_;
+    }
+
+protected:
+    std::shared_ptr<json> connectionData_;
 };
 
 class MagicNumberFraming : public MessageFraming {
