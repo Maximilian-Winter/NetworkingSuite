@@ -47,7 +47,8 @@ function(add_common_settings target)
     target_include_directories(${target} PRIVATE ${ASIO_INCLUDE_DIR})
 endfunction()
 
-add_subdirectory(networking_suite)
+add_subdirectory(common)
+add_subdirectory(echo_server_example)
 
 
 # Print include directories for debugging
