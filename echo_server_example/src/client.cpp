@@ -1,7 +1,3 @@
-//
-// Created by maxim on 07.09.2024.
-//
-// EchoClient.cpp
 #include "Client.h"
 #include "MessageFraming.h"
 #include "MessageHandler.h"
@@ -9,23 +5,31 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <atomic>
 
 class EchoClient {
 public:
-    explicit EchoClient(const Config& config)
+    EchoClient(const Config& config)
         : thread_pool_(std::make_shared<AsioThreadPool>()),
           framing_(std::make_shared<MagicNumberFraming>(0x12345678, 0x87654321)),
-          client_(thread_pool_, framing_, config) {
+          client_(thread_pool_, framing_, config),
+          running_(true) {
 
         tcp_handler_ = std::make_shared<TCPMessageHandler>();
         udp_handler_ = std::make_shared<UDPMessageHandler>();
 
-        tcp_handler_->registerHandler(1, [this](const std::shared_ptr<TCPNetworkUtility::Session>& session, const ByteVector& data) {
-            handleEchoResponse(data);
+        tcp_handler_->registerHandler(0, [this](const std::shared_ptr<TCPNetworkUtility::Session>& session, const ByteVector& data) {
+            NetworkMessages::BinaryMessage<NetworkMessages::ChatMessage> binary_message(0, NetworkMessages::ChatMessage());
+            size_t offset = 0;
+            binary_message.deserialize(data, offset);
+            handleEchoResponse(binary_message.getPayload());
         });
 
-        udp_handler_->registerHandler(1, [this](const std::shared_ptr<UDPNetworkUtility::Connection>& connection, const ByteVector& data) {
-            handleEchoResponse(data);
+        udp_handler_->registerHandler(0, [this](const std::shared_ptr<UDPNetworkUtility::Connection>& connection, const ByteVector& data) {
+            NetworkMessages::BinaryMessage<NetworkMessages::ChatMessage> binary_message(0, NetworkMessages::ChatMessage());
+            size_t offset = 0;
+            binary_message.deserialize(data, offset);
+            handleEchoResponse(binary_message.getPayload());
         });
     }
 
@@ -36,10 +40,11 @@ public:
         connectUDP();
 
         std::thread input_thread([this] { handleUserInput(); });
-        input_thread.detach();
+        input_thread.join(); // Wait for the input thread to finish
     }
 
     void stop() {
+        running_ = false;
         client_.stop();
     }
 
@@ -79,7 +84,7 @@ private:
     }
 
     void handleUserInput() {
-        while (true) {
+        while (running_) {
             std::string input;
             std::cout << "Enter message (or 'quit' to exit): ";
             std::getline(std::cin, input);
@@ -94,10 +99,8 @@ private:
     }
 
     void sendMessage(const std::string& message) {
-        ByteVector data(message.begin(), message.end());
-        NetworkMessages::BinaryMessage<NetworkMessages::MessageTypeData> binary_message(1, NetworkMessages::MessageTypeData());
+        NetworkMessages::BinaryMessage<NetworkMessages::ChatMessage> binary_message(0, NetworkMessages::ChatMessage("Client-00", message));
         auto serialized = binary_message.serialize();
-        serialized.insert(serialized.end(), data.begin(), data.end());
 
         if (tcp_session_) {
             tcp_session_->write(serialized);
@@ -108,8 +111,8 @@ private:
         }
     }
 
-    void handleEchoResponse(const ByteVector& data) {
-        std::cout << "Received echo: " << std::string(data.begin(), data.end()) << std::endl;
+    void handleEchoResponse(const NetworkMessages::ChatMessage& data) {
+        std::cout << "Received echo: " << data.Message << std::endl;
     }
 
     std::shared_ptr<AsioThreadPool> thread_pool_;
@@ -119,6 +122,7 @@ private:
     std::shared_ptr<UDPMessageHandler> udp_handler_;
     std::shared_ptr<TCPNetworkUtility::Session> tcp_session_;
     std::shared_ptr<UDPNetworkUtility::Connection> udp_connection_;
+    std::atomic<bool> running_;
 };
 
 int main() {
@@ -129,9 +133,5 @@ int main() {
     EchoClient client(config);
     client.start();
 
-    std::cout << "Echo client started. Enter messages to send." << std::endl;
-    std::cin.get();  // Wait for Enter to exit
-
-    client.stop();
     return 0;
 }

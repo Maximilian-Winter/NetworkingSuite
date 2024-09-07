@@ -268,6 +268,13 @@ namespace NetworkMessages
     class Error : public BinaryData
     {
     public:
+        Error() = default;
+
+        explicit Error(const std::string &error_message)
+            : ErrorMessage(error_message)
+        {
+        }
+
         std::string ErrorMessage;
 
         [[nodiscard]] ByteVector serialize() const override
@@ -282,9 +289,35 @@ namespace NetworkMessages
             ErrorMessage = read_bytes<std::string>(data, offset);
         }
     };
+    class ChatMessage : public BinaryData
+    {
+    public:
+        ChatMessage() = default;
 
+        explicit ChatMessage(const std::string &sender, const std::string &message)
+            : Sender(sender), Message(message)
+        {
+        }
+        std::string Sender;
+        std::string Message;
+
+        [[nodiscard]] ByteVector serialize() const override
+        {
+            ByteVector data;
+            append_bytes(data, Sender);
+            append_bytes(data, Message);
+            return data;
+        }
+
+        void deserialize(const ByteVector &data, size_t &offset) override
+        {
+            Sender = read_bytes<std::string>(data, offset);
+            Message = read_bytes<std::string>(data, offset);
+        }
+    };
     enum class MessageType : short
     {
+        ChatMessage,
         Error
     };
 

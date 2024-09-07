@@ -18,11 +18,11 @@ public:
         auto tcp_handler = std::make_shared<TCPMessageHandler>();
         auto udp_handler = std::make_shared<UDPMessageHandler>();
 
-        tcp_handler->registerHandler(1, [this](const std::shared_ptr<TCPNetworkUtility::Session>& session, const ByteVector& data) {
+        tcp_handler->registerHandler(0, [this](const std::shared_ptr<TCPNetworkUtility::Session>& session, const ByteVector& data) {
             handleEcho(session, data);
         });
 
-        udp_handler->registerHandler(1, [this](const std::shared_ptr<UDPNetworkUtility::Connection>& connection, const ByteVector& data) {
+        udp_handler->registerHandler(0, [this](const std::shared_ptr<UDPNetworkUtility::Connection>& connection, const ByteVector& data) {
             handleEcho(connection, data);
         });
 
@@ -58,11 +58,17 @@ public:
 private:
 
     void handleEcho(const std::shared_ptr<TCPNetworkUtility::Session>& endpoint, const ByteVector& data) {
-        std::cout << "Received: " << std::string(data.begin(), data.end()) << std::endl;
+        NetworkMessages::BinaryMessage<NetworkMessages::ChatMessage> binary_message(0, NetworkMessages::ChatMessage());
+        size_t offset = 0;
+        binary_message.deserialize(data, offset);
+        std::cout << "Received Message from " << binary_message.getPayload().Sender << ": " <<binary_message.getPayload().Message << std::endl;
         endpoint->write(data);  // Echo back the received data
     }
     void handleEcho(const std::shared_ptr<UDPNetworkUtility::Connection>& endpoint, const ByteVector& data) {
-        std::cout << "Received: " << std::string(data.begin(), data.end()) << std::endl;
+        NetworkMessages::BinaryMessage<NetworkMessages::ChatMessage> binary_message(0, NetworkMessages::ChatMessage());
+        size_t offset = 0;
+        binary_message.deserialize(data, offset);
+        std::cout << "Received Message from " << binary_message.getPayload().Sender << ": " <<binary_message.getPayload().Message << std::endl;
         endpoint->send(data);  // Echo back the received data
     }
     std::shared_ptr<AsioThreadPool> thread_pool_;
