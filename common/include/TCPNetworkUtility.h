@@ -82,7 +82,7 @@ public:
         void do_read() {
             auto read_buffer = buffer_pool_->acquire();
             socket_.async_read_some(
-                asio::buffer(read_buffer->data(), read_buffer->size()),
+                asio::buffer(*read_buffer),
                 asio::bind_executor(strand_, [this, self = shared_from_this(), read_buffer](
                     const asio::error_code& ec, std::size_t bytes_transferred) {
                     if (!ec) {
@@ -90,7 +90,7 @@ public:
                         process_read_data(*read_buffer);
                         do_read();
                     } else if (ec != asio::error::operation_aborted) {
-                        LOG_ERROR("Error in read: %s", ec.message().c_str());
+                        LOG_DEBUG("Error in read: %s", ec.message().c_str());
                         close();
                     }
                     buffer_pool_->release(read_buffer);
@@ -103,8 +103,8 @@ public:
             while (true) {
                 if (message_framing_->isCompleteMessage(read_buffer_)) {
                     ByteVector message = message_framing_->extractMessage(read_buffer_);
-                    size_t message_size = message_framing_->frameMessage(message).size();
-                    read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + static_cast<int>(message_size));
+                    ByteVector message_size = message_framing_->frameMessage(message);
+                    read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + static_cast<int>(message_size.size()));
 
                     message_handler_(message);
                 } else {
@@ -139,7 +139,7 @@ public:
                             do_write();
                         }
                     } else if (ec != asio::error::operation_aborted) {
-                        LOG_ERROR("Error in write: %s", ec.message().c_str());
+                        LOG_DEBUG("Error in write: %s", ec.message().c_str());
                         close();
                     }
                 }));

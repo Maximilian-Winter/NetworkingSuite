@@ -28,7 +28,7 @@ public:
         logger.addDestination(std::make_shared<AsyncLogger::FileDestination>(log_file, log_file_size_in_mb * (1024 * 1024)));
     }
 
-    void addTCPPort(unsigned short port_number, const std::function<void(std::shared_ptr<TCPNetworkUtility::Session>)> &connectedCallback, const std::shared_ptr<TCPMessageHandler> &handler, const std::function<void(std::shared_ptr<TCPNetworkUtility::Session>)>& close_callback) {
+    void addTCPPort(unsigned short port_number, const std::function<void(std::shared_ptr<TCPNetworkUtility::Session>)> &connectedCallback, const std::shared_ptr<MessageHandler<std::shared_ptr<TCPNetworkUtility::Session>>> &handler, const std::function<void(std::shared_ptr<TCPNetworkUtility::Session>)>& close_callback) {
         auto tcp_port = std::make_shared<TCPPort>(thread_pool_->get_io_context(), port_number, framing_);
         tcp_port->setConnectedCallback(connectedCallback);
         tcp_port->setMessageHandler(handler);

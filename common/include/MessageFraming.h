@@ -24,7 +24,7 @@ public:
     virtual bool isCompleteMessage(const ByteVector& buffer) const = 0;
 
     // Extract the message from a framed buffer
-    virtual ByteVector extractMessage(const ByteVector& buffer) const = 0;
+    virtual ByteVector extractMessage(const ByteVector& buffer) = 0;
 
     // Get the maximum overhead added by framing
     virtual size_t getMaxFramingOverhead() const = 0;
@@ -73,7 +73,7 @@ public:
                buffer.size() == messageSize + sizeof(uint32_t) * 3;
     }
 
-    ByteVector extractMessage(const ByteVector& buffer) const override {
+    ByteVector extractMessage(const ByteVector& buffer) override {
         if (!isCompleteMessage(buffer)) {
             throw std::runtime_error("Incomplete or invalid message");
         }

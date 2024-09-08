@@ -49,7 +49,7 @@ endfunction()
 
 add_subdirectory(common)
 add_subdirectory(echo_server_example)
-
+add_subdirectory(http_server_example)
 
 # Print include directories for debugging
 get_property(dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES)

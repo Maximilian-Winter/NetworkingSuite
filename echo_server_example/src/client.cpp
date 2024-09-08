@@ -99,7 +99,7 @@ private:
     }
 
     void sendMessage(const std::string& message) {
-        NetworkMessages::BinaryMessage<NetworkMessages::ChatMessage> binary_message(0, NetworkMessages::ChatMessage("Client-00", message));
+        NetworkMessages::BinaryMessage<NetworkMessages::ChatMessage> binary_message(0, NetworkMessages::ChatMessage("MadWizard", message));
         auto serialized = binary_message.serialize();
 
         if (tcp_session_) {

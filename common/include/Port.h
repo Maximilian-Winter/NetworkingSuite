@@ -64,7 +64,7 @@ public:
         connected_callback_ = callback;
     }
 
-    void setMessageHandler(const std::shared_ptr<TCPMessageHandler> &handler)
+    void setMessageHandler(const std::shared_ptr<MessageHandler<std::shared_ptr<TCPNetworkUtility::Session>>> &handler)
     {
         message_handler_ = handler;
     }
@@ -95,7 +95,7 @@ private:
                         {
                             if (close_callback_)
                             {
-                                close_callback_(std::move(s));
+                                close_callback_(s);
                             }
                             {
                                 std::lock_guard lock(user_mutex);
@@ -118,7 +118,7 @@ private:
     }
 
     asio::ip::tcp::acceptor acceptor_;
-    std::shared_ptr<TCPMessageHandler> message_handler_;
+    std::shared_ptr<MessageHandler<std::shared_ptr<TCPNetworkUtility::Session>>> message_handler_;
     std::mutex user_mutex;
     std::unordered_map<std::string, std::shared_ptr<TCPNetworkUtility::Session> > connected_users_;
     std::function<void(std::shared_ptr<TCPNetworkUtility::Session>)> connected_callback_;

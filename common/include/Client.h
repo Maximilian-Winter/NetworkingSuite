@@ -32,12 +32,12 @@ public:
 
     void connectTCP(const std::string& host, const std::string& port,
                 const std::function<void(std::error_code, std::shared_ptr<TCPNetworkUtility::Session>)>& connect_callback,
-                    const std::shared_ptr<TCPMessageHandler>& message_handler,
+                    const std::shared_ptr<MessageHandler<std::shared_ptr<TCPNetworkUtility::Session>>> &handler,
                     const std::function<void(std::shared_ptr<TCPNetworkUtility::Session>)>& close_callback) {
 
-        auto messageHandling = [message_handler](std::shared_ptr<TCPNetworkUtility::Session> session, ByteVector message)
+        auto messageHandling = [handler](std::shared_ptr<TCPNetworkUtility::Session> session, ByteVector message)
         {
-            message_handler->handleMessage(session, message);
+            handler->handleMessage(session, message);
         };
         TCPNetworkUtility::connect(
             thread_pool_->get_io_context(), host, port, framing_,
