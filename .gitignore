@@ -69,3 +69,6 @@ Thumbs.db
 *.log
 
 /dh2048.pem
+/server.crt
+/server.csr
+/server.key
