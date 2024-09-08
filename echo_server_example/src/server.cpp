@@ -12,36 +12,34 @@ class EchoServer {
 public:
     explicit EchoServer(const Config& config)
         : thread_pool_(std::make_shared<AsioThreadPool>()),
-          framing_(std::make_shared<MagicNumberFraming>(0x12345678, 0x87654321)),
-          server_(thread_pool_, framing_, config) {
+          server_(thread_pool_, config) {
+        const std::shared_ptr<TCPMessageHandler<MagicNumberFraming, MagicNumberFraming>> tcp_handler = std::make_shared<TCPMessageHandler<MagicNumberFraming, MagicNumberFraming>>();
+        const std::shared_ptr<UDPMessageHandler<MagicNumberFraming, MagicNumberFraming>> udp_handler = std::make_shared<UDPMessageHandler<MagicNumberFraming, MagicNumberFraming>>();
 
-        auto tcp_handler = std::make_shared<TCPMessageHandler>();
-        auto udp_handler = std::make_shared<UDPMessageHandler>();
-
-        tcp_handler->registerHandler(0, [this](const std::shared_ptr<TCPNetworkUtility::Session>& session, const ByteVector& data) {
+        tcp_handler->registerHandler(0, [this](const std::shared_ptr<TCPNetworkUtility::Session<MagicNumberFraming, MagicNumberFraming>>& session, const ByteVector& data) {
             handleEcho(session, data);
         });
 
-        udp_handler->registerHandler(0, [this](const std::shared_ptr<UDPNetworkUtility::Connection>& connection, const ByteVector& data) {
+        udp_handler->registerHandler(0, [this](const std::shared_ptr<UDPNetworkUtility::Connection<MagicNumberFraming, MagicNumberFraming>>& connection, const ByteVector& data) {
             handleEcho(connection, data);
         });
 
-        server_.addTCPPort(8080,
-            [](std::shared_ptr<TCPNetworkUtility::Session> session) {
+        server_.addTCPPort<MagicNumberFraming, MagicNumberFraming>(8080,
+            [](std::shared_ptr<TCPNetworkUtility::Session<MagicNumberFraming, MagicNumberFraming>> session) {
                 std::cout << "New TCP connection: " << session->getSessionUuid() << std::endl;
             },
             tcp_handler,
-            [](std::shared_ptr<TCPNetworkUtility::Session> session) {
+            [](std::shared_ptr<TCPNetworkUtility::Session<MagicNumberFraming, MagicNumberFraming>> session) {
                 std::cout << "TCP connection closed: " << session->getSessionUuid() << std::endl;
             }
         );
 
-        server_.addUDPPort(8081,
-            [](std::shared_ptr<UDPNetworkUtility::Connection> connection) {
+        server_.addUDPPort<MagicNumberFraming, MagicNumberFraming>(8081,
+            [](std::shared_ptr<UDPNetworkUtility::Connection<MagicNumberFraming, MagicNumberFraming>> connection) {
                 std::cout << "New UDP connection: " << connection->getConnectionUuid() << std::endl;
             },
             udp_handler,
-            [](std::shared_ptr<UDPNetworkUtility::Connection> connection) {
+            [](std::shared_ptr<UDPNetworkUtility::Connection<MagicNumberFraming, MagicNumberFraming>> connection) {
                 std::cout << "UDP connection closed: " << connection->getConnectionUuid() << std::endl;
             }
         );
@@ -57,14 +55,14 @@ public:
 
 private:
 
-    void handleEcho(const std::shared_ptr<TCPNetworkUtility::Session>& endpoint, const ByteVector& data) {
+    void handleEcho(const std::shared_ptr<TCPNetworkUtility::Session<MagicNumberFraming, MagicNumberFraming>>& endpoint, const ByteVector& data) {
         NetworkMessages::BinaryMessage<NetworkMessages::ChatMessage> binary_message(0, NetworkMessages::ChatMessage());
         size_t offset = 0;
         binary_message.deserialize(data, offset);
         std::cout << "Received Message from " << binary_message.getPayload().Sender << ": " <<binary_message.getPayload().Message << std::endl;
         endpoint->write(data);  // Echo back the received data
     }
-    void handleEcho(const std::shared_ptr<UDPNetworkUtility::Connection>& endpoint, const ByteVector& data) {
+    void handleEcho(const std::shared_ptr<UDPNetworkUtility::Connection<MagicNumberFraming, MagicNumberFraming>>& endpoint, const ByteVector& data) {
         NetworkMessages::BinaryMessage<NetworkMessages::ChatMessage> binary_message(0, NetworkMessages::ChatMessage());
         size_t offset = 0;
         binary_message.deserialize(data, offset);

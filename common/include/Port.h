@@ -16,10 +16,8 @@ class Port
 public:
     enum class Protocol { TCP, UDP };
 
-    Port(asio::io_context &io_context, unsigned short port_number, Protocol protocol,
-         std::shared_ptr<MessageFraming> framing)
-        : io_context_(io_context), port_number_(port_number), protocol_(protocol),
-          framing_(std::move(framing))
+    Port(asio::io_context &io_context, unsigned short port_number, Protocol protocol)
+        : io_context_(io_context), port_number_(port_number), protocol_(protocol)
     {
     }
 
@@ -36,15 +34,15 @@ protected:
     asio::io_context &io_context_;
     unsigned short port_number_;
     Protocol protocol_;
-    std::shared_ptr<MessageFraming> framing_;
+
 };
 
+template<typename SendFraming, typename ReceiveFraming>
 class TCPPort : public Port
 {
 public:
-    TCPPort(asio::io_context &io_context, unsigned short port_number,
-            std::shared_ptr<MessageFraming> framing)
-        : Port(io_context, port_number, Protocol::TCP, std::move(framing)),
+    TCPPort(asio::io_context &io_context, unsigned short port_number)
+        : Port(io_context, port_number, Protocol::TCP),
           acceptor_(io_context, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port_number))
     {
     }
@@ -59,17 +57,17 @@ public:
         acceptor_.close();
     }
 
-    void setConnectedCallback(const std::function<void(std::shared_ptr<TCPNetworkUtility::Session>)> &callback)
+    void setConnectedCallback(const std::function<void(std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>>)> &callback)
     {
         connected_callback_ = callback;
     }
 
-    void setMessageHandler(const std::shared_ptr<TCPMessageHandler> &handler)
+    void setMessageHandler(const std::shared_ptr<TCPMessageHandler<SendFraming, ReceiveFraming>> &handler)
     {
         message_handler_ = handler;
     }
 
-    void setCloseCallback(const std::function<void(std::shared_ptr<TCPNetworkUtility::Session>)> &callback)
+    void setCloseCallback(const std::function<void(std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>>)> &callback)
     {
         close_callback_ = callback;
     }
@@ -82,7 +80,7 @@ private:
             {
                 if (!ec)
                 {
-                    auto session = TCPNetworkUtility::createSession(io_context_, socket, framing_);
+                    auto session = TCPNetworkUtility::createSession<SendFraming, ReceiveFraming>(io_context_, socket);
                     session->start(
                         [this, session](const ByteVector &data)
                         {
@@ -91,7 +89,7 @@ private:
                                 message_handler_->handleMessage(session, data);
                             }
                         },
-                        [this](std::shared_ptr<TCPNetworkUtility::Session> s)
+                        [this](std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>> s)
                         {
                             if (close_callback_)
                             {
@@ -118,19 +116,19 @@ private:
     }
 
     asio::ip::tcp::acceptor acceptor_;
-    std::shared_ptr<TCPMessageHandler> message_handler_;
+    std::shared_ptr<TCPMessageHandler<SendFraming, ReceiveFraming>> message_handler_;
     std::mutex user_mutex;
-    std::unordered_map<std::string, std::shared_ptr<TCPNetworkUtility::Session> > connected_users_;
-    std::function<void(std::shared_ptr<TCPNetworkUtility::Session>)> connected_callback_;
-    std::function<void(std::shared_ptr<TCPNetworkUtility::Session>)> close_callback_;
+    std::unordered_map<std::string, std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>> > connected_users_;
+    std::function<void(std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>>)> connected_callback_;
+    std::function<void(std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>>)> close_callback_;
 };
 
+template<typename SendFraming, typename ReceiveFraming>
 class UDPPort : public Port
 {
 public:
-    UDPPort(asio::io_context &io_context, unsigned short port_number,
-            std::shared_ptr<MessageFraming> framing)
-        : Port(io_context, port_number, Protocol::UDP, std::move(framing)),
+    UDPPort(asio::io_context &io_context, unsigned short port_number)
+        : Port(io_context, port_number, Protocol::UDP),
           socket_(io_context, asio::ip::udp::endpoint(asio::ip::udp::v4(), port_number))
     {
     }
@@ -145,17 +143,17 @@ public:
         socket_.close();
     }
 
-    void setMessageHandler(const std::shared_ptr<UDPMessageHandler> &handler)
+    void setMessageHandler(const std::shared_ptr<UDPMessageHandler<SendFraming, ReceiveFraming>> &handler)
     {
         message_handler_ = handler;
     }
 
-    void setConnectedCallback(const std::function<void(std::shared_ptr<UDPNetworkUtility::Connection>)> &callback)
+    void setConnectedCallback(const std::function<void(std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>>)> &callback)
     {
         connected_callback_ = callback;
     }
 
-    void setCloseCallback(const std::function<void(std::shared_ptr<UDPNetworkUtility::Connection>)> &callback)
+    void setCloseCallback(const std::function<void(std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>>)> &callback)
     {
         close_callback_ = callback;
     }
@@ -172,12 +170,13 @@ private:
                 if (!ec)
                 {
                     receive_buffer->resize(bytes_recvd);
+                    ReceiveFraming framing_;
                     if (framing_->isCompleteMessage(*receive_buffer))
                     {
                         auto message = framing_->extractMessage(*receive_buffer);
                         if (message_handler_)
                         {
-                            auto connection = std::make_shared<UDPNetworkUtility::Connection>(io_context_, framing_);
+                            auto connection = std::make_shared<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>>(io_context_, framing_);
                             connection->socket() = std::move(socket_);
                             connection->endpoint = sender_endpoint_;
                             connection->start(
@@ -189,7 +188,7 @@ private:
                                     }
                                 });
                             connection->set_closed_callback(
-                                [this](const std::shared_ptr<UDPNetworkUtility::Connection> &c)
+                                [this](const std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>> &c)
                                 {
                                     if (close_callback_)
                                     {
@@ -218,9 +217,9 @@ private:
     std::mutex user_mutex;
     asio::ip::udp::socket socket_;
     asio::ip::udp::endpoint sender_endpoint_;
-    std::shared_ptr<UDPMessageHandler> message_handler_;
-    std::function<void(std::shared_ptr<UDPNetworkUtility::Connection>)> close_callback_;
-    std::function<void(std::shared_ptr<UDPNetworkUtility::Connection>)> connected_callback_;
-    std::unordered_map<std::string, std::shared_ptr<UDPNetworkUtility::Connection> > connected_users_;
+    std::shared_ptr<UDPMessageHandler<SendFraming, ReceiveFraming>> message_handler_;
+    std::function<void(std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>>)> close_callback_;
+    std::function<void(std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>>)> connected_callback_;
+    std::unordered_map<std::string, std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>> > connected_users_;
     static constexpr std::size_t buffer_size = 8192;
 };
