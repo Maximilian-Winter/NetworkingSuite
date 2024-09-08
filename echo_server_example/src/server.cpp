@@ -23,6 +23,9 @@ public:
         udp_handler->registerHandler(0, [this](const std::shared_ptr<UDPNetworkUtility::Connection<MagicNumberFraming, MagicNumberFraming>>& connection, const ByteVector& data) {
             handleEcho(connection, data);
         });
+        json framingInitialData ={};
+        framingInitialData["magic_number_start"] = 42;
+        framingInitialData["magic_number_end"] = 24;
 
         server_.addTCPPort<MagicNumberFraming, MagicNumberFraming>(8080,
             [](std::shared_ptr<TCPNetworkUtility::Session<MagicNumberFraming, MagicNumberFraming>> session) {
@@ -31,7 +34,7 @@ public:
             tcp_handler,
             [](std::shared_ptr<TCPNetworkUtility::Session<MagicNumberFraming, MagicNumberFraming>> session) {
                 std::cout << "TCP connection closed: " << session->getSessionUuid() << std::endl;
-            }
+            },framingInitialData, framingInitialData
         );
 
         server_.addUDPPort<MagicNumberFraming, MagicNumberFraming>(8081,
@@ -41,7 +44,7 @@ public:
             udp_handler,
             [](std::shared_ptr<UDPNetworkUtility::Connection<MagicNumberFraming, MagicNumberFraming>> connection) {
                 std::cout << "UDP connection closed: " << connection->getConnectionUuid() << std::endl;
-            }
+            }, framingInitialData, framingInitialData
         );
     }
 

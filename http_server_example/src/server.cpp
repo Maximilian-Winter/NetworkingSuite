@@ -33,7 +33,7 @@ public:
             tcp_handler,
             [](std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming,HTTPMessageFraming>> session) {
                 std::cout << "HTTP connection closed: " << session->getSessionUuid() << std::endl;
-            }
+            }, {}, {}
         );
     }
 
@@ -75,12 +75,9 @@ private:
         }
         session->getSendFraming().setMessageType(HTTPMessageFraming::MessageType::RESPONSE);
 
-        session->getSendFraming().setContentType("plain/text");
         // Set headers for framing
         session->getSendFraming().setHeaders(response_headers);
 
-        // Frame the response using HTTPMessageFraming
-        //auto framed_response = framing_->frameMessage(ByteVector(response.begin(), response.end()));
 
         session->write(ByteVector(response.begin(), response.end()));
     }
@@ -107,7 +104,7 @@ int main() {
     });
 
     server.addRoute("/echo", [](const std::string& method, const std::unordered_map<std::string, std::string>& headers, const std::string& body, std::string& response, std::unordered_map<std::string, std::string>& response_headers) {
-        response = "You said: " + body;
+        response = body;
         response_headers["Content-Type"] = "text/plain";
         response_headers["Content-Length"] = std::to_string(static_cast<int>(response.size()));
     });

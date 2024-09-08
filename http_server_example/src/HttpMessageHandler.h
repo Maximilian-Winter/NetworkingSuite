@@ -8,11 +8,11 @@
 #include <functional>
 #include <unordered_map>
 #include <memory>
-class HTTPMessageHandler : public MessageHandler<std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming,HTTPMessageFraming>>> {
+class HTTPMessageHandler : public TCPMessageHandler<HTTPMessageFraming, HTTPMessageFraming> {
 public:
     using HTTPCallback = std::function<void(const std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming,HTTPMessageFraming>>&, const ByteVector&)>;
 
-    void registerHandler(short messageType, MessageCallback callback) override {
+    void registerHandler(short messageType, HTTPCallback callback) override {
         // For HTTP, we don't use message types, so we'll ignore the messageType parameter
         m_handler = std::move(callback);
     }

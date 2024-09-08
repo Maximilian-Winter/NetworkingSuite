@@ -7,15 +7,13 @@
 
 class HTTPMessageFraming : public MessageFraming {
 public:
-
-
     enum class MessageType {
         REQUEST,
         RESPONSE,
         UNKNOWN
     };
 
-    HTTPMessageFraming(){
+    explicit HTTPMessageFraming(const json& initializingData): MessageFraming(initializingData){
         if (!connectionData_) {
             connectionData_ = std::make_shared<json>();
         }
@@ -24,7 +22,7 @@ public:
         (*connectionData_)["content_type"] = "plain/text";
     }
 
-    HTTPMessageFraming(MessageType message_type)
+    HTTPMessageFraming(const json& initializingData, MessageType message_type): MessageFraming(initializingData)
     {
         if (!connectionData_) {
             connectionData_ = std::make_shared<json>();
@@ -50,11 +48,7 @@ public:
         if (connectionData_) {
             const auto& headers = connectionData_->at("headers").get<std::unordered_map<std::string, std::string>>();
             for (const auto& [key, value] : headers) {
-                if(key == "Content-Length" && std::stoi(value) > 0)
-                {
-                    framedMessage << key << ": " << value << "\r\n";
-                    framedMessage << "Content-Type: " << (*connectionData_)["content_type"] << "\r\n";
-                }
+                framedMessage << key << ": " << value << "\r\n";
             }
         }
 
@@ -233,8 +227,6 @@ public:
     }
 
 private:
-
-    MessageType messageType_;
 
     std::string getRequestLine() const {
         std::string method = connectionData_->value("request_method", "GET");

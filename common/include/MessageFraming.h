@@ -15,6 +15,10 @@ using json = nlohmann::json;
 
 class MessageFraming {
 public:
+    explicit MessageFraming(const json initializingData)
+    {
+        initializingData_ = std::make_shared<json>(initializingData);
+    }
     virtual ~MessageFraming() = default;
 
     // Frame a message for sending
@@ -39,16 +43,22 @@ public:
         return connectionData_;
     }
 
+
 protected:
+    std::shared_ptr<json> initializingData_;
     std::shared_ptr<json> connectionData_;
 };
 
 class MagicNumberFraming : public MessageFraming {
 public:
-    MagicNumberFraming(uint32_t startMagic, uint32_t endMagic)
-        : startMagicNumber_(startMagic), endMagicNumber_(endMagic) {}
+    explicit MagicNumberFraming(const json initializingData)
+        : MessageFraming(initializingData)
+    {
+        startMagicNumber_ = (*initializingData_)["magic_number_start"];
+        endMagicNumber_ = (*initializingData_)["magic_number_end"];
+    }
 
-    ByteVector frameMessage(const ByteVector& message) const override {
+    [[nodiscard]] ByteVector frameMessage(const ByteVector& message) const override {
         ByteVector framedMessage;
         framedMessage.reserve(sizeof(uint32_t) * 3 + message.size());
 

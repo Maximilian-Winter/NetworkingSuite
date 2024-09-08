@@ -41,8 +41,8 @@ template<typename SendFraming, typename ReceiveFraming>
 class TCPPort : public Port
 {
 public:
-    TCPPort(asio::io_context &io_context, unsigned short port_number)
-        : Port(io_context, port_number, Protocol::TCP),
+    TCPPort(asio::io_context &io_context, unsigned short port_number, const json senderFramingInitialData, const json receiveFramingInitialData)
+        : Port(io_context, port_number, Protocol::TCP), senderFramingInitialData(senderFramingInitialData), receiveFramingInitialData(receiveFramingInitialData),
           acceptor_(io_context, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port_number))
     {
     }
@@ -80,7 +80,7 @@ private:
             {
                 if (!ec)
                 {
-                    auto session = TCPNetworkUtility::createSession<SendFraming, ReceiveFraming>(io_context_, socket);
+                    auto session = TCPNetworkUtility::createSession<SendFraming, ReceiveFraming>(io_context_, socket, senderFramingInitialData, receiveFramingInitialData);
                     session->start(
                         [this, session](const ByteVector &data)
                         {
@@ -114,7 +114,8 @@ private:
                 do_accept();
             });
     }
-
+    json senderFramingInitialData;
+    json receiveFramingInitialData;
     asio::ip::tcp::acceptor acceptor_;
     std::shared_ptr<TCPMessageHandler<SendFraming, ReceiveFraming>> message_handler_;
     std::mutex user_mutex;
@@ -127,8 +128,8 @@ template<typename SendFraming, typename ReceiveFraming>
 class UDPPort : public Port
 {
 public:
-    UDPPort(asio::io_context &io_context, unsigned short port_number)
-        : Port(io_context, port_number, Protocol::UDP),
+    UDPPort(asio::io_context &io_context, unsigned short port_number, json senderFramingInitialData, json receiveFramingInitialData)
+        : Port(io_context, port_number, Protocol::UDP), senderFramingInitialData(senderFramingInitialData), receiveFramingInitialData(receiveFramingInitialData),
           socket_(io_context, asio::ip::udp::endpoint(asio::ip::udp::v4(), port_number))
     {
     }
@@ -170,13 +171,13 @@ private:
                 if (!ec)
                 {
                     receive_buffer->resize(bytes_recvd);
-                    ReceiveFraming framing_;
-                    if (framing_->isCompleteMessage(*receive_buffer))
+                    ReceiveFraming framing_(receiveFramingInitialData);
+                    if (framing_.isCompleteMessage(*receive_buffer))
                     {
-                        auto message = framing_->extractMessage(*receive_buffer);
+                        auto message = framing_.extractMessage(*receive_buffer);
                         if (message_handler_)
                         {
-                            auto connection = std::make_shared<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>>(io_context_, framing_);
+                            auto connection = std::make_shared<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>>(io_context_, senderFramingInitialData, receiveFramingInitialData);
                             connection->socket() = std::move(socket_);
                             connection->endpoint = sender_endpoint_;
                             connection->start(
@@ -213,7 +214,8 @@ private:
                 do_receive();
             });
     }
-
+    json senderFramingInitialData;
+    json receiveFramingInitialData;
     std::mutex user_mutex;
     asio::ip::udp::socket socket_;
     asio::ip::udp::endpoint sender_endpoint_;

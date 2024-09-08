@@ -31,11 +31,11 @@ public:
         auto get_shared_this() {
             return this->std::enable_shared_from_this<Session>::template shared_from_this();
         }
-        explicit Session(asio::io_context& io_context)
+        explicit Session(asio::io_context& io_context, const json senderFramingInitialData, const json receiveFramingInitialData)
             : socket_(io_context),
               strand_(asio::make_strand(io_context)),
               buffer_pool_(std::make_shared<BufferPool>(8192)),
-              sessionUuid_(Utilities::generateUuid())
+              sessionUuid_(Utilities::generateUuid()), send_framing_(senderFramingInitialData), receive_framing_(receiveFramingInitialData)
         {
             read_buffer_.reserve(buffer_pool_->getBufferSize() + receive_framing_.getMaxFramingOverhead());
         }
@@ -195,8 +195,8 @@ public:
         }
     };
     template<typename SendFraming, typename ReceiveFraming>
-    static std::shared_ptr<Session<SendFraming, ReceiveFraming>> createSession(asio::io_context& io_context, asio::ip::tcp::socket& socket) {
-        auto session = std::make_shared<Session<SendFraming, ReceiveFraming>>(io_context);
+    static std::shared_ptr<Session<SendFraming, ReceiveFraming>> createSession(asio::io_context& io_context, asio::ip::tcp::socket& socket, const json senderFramingInitialData, const json receiveFramingInitialData) {
+        auto session = std::make_shared<Session<SendFraming, ReceiveFraming>>(io_context, senderFramingInitialData, receiveFramingInitialData);
         session->socket() = std::move(socket);
         return session;
     }
@@ -207,9 +207,9 @@ public:
         const std::string& port,
         const std::function<void(std::error_code, std::shared_ptr<Session<SendFraming, ReceiveFraming>>)>& callback,
         const std::function<void(std::shared_ptr<Session<SendFraming, ReceiveFraming>> session, ByteVector message)>& messageCallback,
-        const std::function<void(std::shared_ptr<Session<SendFraming, ReceiveFraming>>)>& closedCallback) {
+        const std::function<void(std::shared_ptr<Session<SendFraming, ReceiveFraming>>)>& closedCallback, const json& senderFramingInitialData, const json& receiveFramingInitialData) {
 
-        auto session = std::make_shared<Session<SendFraming, ReceiveFraming>>(io_context);
+        auto session = std::make_shared<Session<SendFraming, ReceiveFraming>>(io_context, senderFramingInitialData, receiveFramingInitialData);
 
         asio::ip::tcp::resolver resolver(io_context);
         auto endpoints = resolver.resolve(host, port);

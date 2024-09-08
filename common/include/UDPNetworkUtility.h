@@ -26,12 +26,12 @@ public:
         ReceiveFraming receive_framing_;
 
     public:
-        explicit Connection(asio::io_context& io_context)
+        explicit Connection(asio::io_context& io_context, json senderFramingInitialData, json receiveFramingInitialData)
             : socket_(io_context, asio::ip::udp::endpoint(asio::ip::udp::v4(), 0)),
-              resolver(io_context),
+              connectionUuid_(Utilities::generateUuid()),
               strand_(asio::make_strand(io_context)),
               buffer_pool_(std::make_shared<BufferPool>(8192)),
-              connectionUuid_(Utilities::generateUuid())
+              resolver(io_context),send_framing_(senderFramingInitialData), receive_framing_(receiveFramingInitialData)
         {
         }
         auto get_shared_this() {
@@ -196,8 +196,9 @@ public:
     using MessageCallback = std::function<void(const std::shared_ptr<Connection<SendFraming, ReceiveFraming>>&, const ByteVector&)>;
 
     template<typename SendFraming, typename ReceiveFraming>
-    static std::shared_ptr<Connection<SendFraming, ReceiveFraming>> create_connection(asio::io_context& io_context) {
-        return std::make_shared<Connection<SendFraming, ReceiveFraming>>(io_context);
+    static std::shared_ptr<Connection<SendFraming, ReceiveFraming>> create_connection(asio::io_context& io_context, json& senderFramingInitialData, json& receiveFramingInitialData) {
+        return std::make_shared<Connection<SendFraming, ReceiveFraming>>(io_context, senderFramingInitialData, receiveFramingInitialData);
+
     }
 
     template<typename SendFraming, typename ReceiveFraming>
@@ -207,9 +208,9 @@ public:
         const std::string& port,
         const std::function<void(std::error_code, std::shared_ptr<Connection<SendFraming, ReceiveFraming>>)>& callback,
         const MessageCallback<SendFraming, ReceiveFraming>& messageCallback,
-        const std::function<void(std::shared_ptr<Connection<SendFraming, ReceiveFraming>>)>& closed_callback) {
+        const std::function<void(std::shared_ptr<Connection<SendFraming, ReceiveFraming>>)>& closed_callback, json& senderFramingInitialData, json& receiveFramingInitialData) {
 
-        auto connection = create_connection<SendFraming, ReceiveFraming>(io_context);
+        auto connection = create_connection<SendFraming, ReceiveFraming>(io_context, senderFramingInitialData, receiveFramingInitialData);
         connection->set_closed_callback(closed_callback);
 
         auto endpoints = connection->resolver.resolve(asio::ip::udp::v4(), host, port);

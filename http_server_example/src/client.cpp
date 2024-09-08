@@ -49,7 +49,7 @@ public:
             tcp_handler_,
             [](std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming, HTTPMessageFraming>> session) {
                 std::cout << "HTTP connection closed" << std::endl;
-            }
+            }, {}, {}
         );
 
         return future;

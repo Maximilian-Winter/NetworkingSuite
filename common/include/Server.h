@@ -27,16 +27,16 @@ public:
         logger.addDestination(std::make_shared<AsyncLogger::FileDestination>(log_file, log_file_size_in_mb * (1024 * 1024)));
     }
     template<typename SendFraming, typename ReceiveFraming>
-    void addTCPPort(unsigned short port_number, const std::function<void(std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>>)> &connectedCallback, const std::shared_ptr<TCPMessageHandler<SendFraming, ReceiveFraming>> &handler, const std::function<void(std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>>)>& close_callback) {
-        auto tcp_port = std::make_shared<TCPPort<SendFraming, ReceiveFraming>>(thread_pool_->get_io_context(), port_number);
+    void addTCPPort(unsigned short port_number, const std::function<void(std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>>)> &connectedCallback, const std::shared_ptr<TCPMessageHandler<SendFraming, ReceiveFraming>> &handler, const std::function<void(std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>>)>& close_callback, const json senderFramingInitialData, const json receiveFramingInitialData) {
+        auto tcp_port = std::make_shared<TCPPort<SendFraming, ReceiveFraming>>(thread_pool_->get_io_context(), port_number, senderFramingInitialData, receiveFramingInitialData);
         tcp_port->setConnectedCallback(connectedCallback);
         tcp_port->setMessageHandler(handler);
         tcp_port->setCloseCallback(close_callback);
         ports_.push_back(tcp_port);
     }
     template<typename SendFraming, typename ReceiveFraming>
-    void addUDPPort(unsigned short port_number, const std::function<void(std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>>)> &connectedCallback, const std::shared_ptr<UDPMessageHandler<SendFraming, ReceiveFraming>>& handler, const std::function<void(std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>>)>& close_callback) {
-        auto udp_port = std::make_shared<UDPPort<SendFraming, ReceiveFraming>>(thread_pool_->get_io_context(), port_number);
+    void addUDPPort(unsigned short port_number, const std::function<void(std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>>)> &connectedCallback, const std::shared_ptr<UDPMessageHandler<SendFraming, ReceiveFraming>>& handler, const std::function<void(std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>>)>& close_callback, const json senderFramingInitialData, const json receiveFramingInitialData) {
+        auto udp_port = std::make_shared<UDPPort<SendFraming, ReceiveFraming>>(thread_pool_->get_io_context(), port_number, senderFramingInitialData, receiveFramingInitialData);
         udp_port->setConnectedCallback(connectedCallback);
         udp_port->setMessageHandler(handler);
         udp_port->setCloseCallback(close_callback);
