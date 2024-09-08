@@ -8,8 +8,10 @@
 #include "HttpMessageFraming.h"
 #include "HttpMessageHandler.h"
 #include "Config.h"
+#include "FileServer.h"
 #include <unordered_map>
 #include <functional>
+#include <regex>
 
 class HttpServer {
 public:
@@ -26,6 +28,10 @@ public:
 
         setupHTTPServer();
         setupHTTPSServer();
+
+        // Initialize FileServer with root directory from config
+        std::string root_dir = config_->get<std::string>("file_server_root", "./public");
+        file_server_ = std::make_unique<FileServer>(root_dir);
     }
 
     void start() {
@@ -37,7 +43,7 @@ public:
     }
 
     void addRoute(const std::string& path, RequestHandler handler) {
-        routes_[path] = std::move(handler);
+        routes_.push_back({std::regex(path), handler});
     }
 
 private:
@@ -88,7 +94,7 @@ private:
         );
     }
 
-    void handleHTTPRequest(const std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming,HttpMessageFraming>>& session, const ByteVector& data) {
+     void handleHTTPRequest(const std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming,HttpMessageFraming>>& session, const ByteVector& data) {
         processRequest(session, data);
     }
 
@@ -102,7 +108,7 @@ private:
         std::string path = session->getReceiveFraming().getRequestPath();
         std::string http_version = session->getReceiveFraming().getHttpVersion();
 
-        std::unordered_map<std::string, std::string> headers;
+        std::unordered_map<std::string, std::string> headers = session->getReceiveFraming().getHeaders();
 
         std::string body;
         if (static_cast<int>(data.size()) > 0) {
@@ -112,16 +118,41 @@ private:
         std::string response;
         std::unordered_map<std::string, std::string> response_headers;
 
-        auto route_handler = routes_.find(path);
-        if (route_handler != routes_.end()) {
-            route_handler->second(method, headers, body, response, response_headers);
-        } else {
-            response = "404 Not Found";
-            response_headers["Content-Type"] = "text/plain";
-        }
-        session->getSendFraming().setMessageType(HttpMessageFraming::MessageType::RESPONSE);
+        bool route_handled = false;
 
-        // Set headers for framing
+        // Check for matching routes
+        for (const auto& route : routes_) {
+            std::smatch matches;
+            if (std::regex_match(path, matches, route.first)) {
+                route.second(method, headers, body, response, response_headers);
+                route_handled = true;
+                break;
+            }
+        }
+
+        // If no route handled the request, try to serve a file
+        if (!route_handled) {
+            std::string content_type;
+            if(path == "/")
+            {
+                if(file_server_->serveFile(path + "index.html", response, content_type))
+                {
+                    response_headers["Content-Type"] = content_type;
+                } else {
+                    response = "404 Not Found";
+                    response_headers["Content-Type"] = "text/plain";
+                }
+            }
+            if (file_server_->serveFile(path, response, content_type)) {
+                response_headers["Content-Type"] = content_type;
+
+            } else {
+                response = "404 Not Found";
+                response_headers["Content-Type"] = "text/plain";
+            }
+        }
+        response_headers["Content-Length"] = std::to_string(static_cast<int>(response.size()));
+        session->getSendFraming().setMessageType(HttpMessageFraming::MessageType::RESPONSE);
         session->getSendFraming().setHeaders(response_headers);
 
         session->write(ByteVector(response.begin(), response.end()));
@@ -130,5 +161,6 @@ private:
     std::shared_ptr<Config> config_;
     std::shared_ptr<AsioThreadPool> thread_pool_;
     std::unique_ptr<Server> server_;
-    std::unordered_map<std::string, RequestHandler> routes_;
+    std::vector<std::pair<std::regex, RequestHandler>> routes_;
+    std::unique_ptr<FileServer> file_server_;
 };
