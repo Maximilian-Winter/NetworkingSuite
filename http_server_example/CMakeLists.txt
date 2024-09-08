@@ -39,3 +39,22 @@ target_compile_options(http_client PRIVATE ${COMMON_COMPILE_OPTIONS})
 set_target_properties(http_client PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
+
+
+add_executable(ssl_http_server src/ssl_server.cpp)
+
+
+target_include_directories(ssl_http_server PRIVATE
+        ${CMAKE_SOURCE_DIR}/common/include
+)
+
+target_link_libraries(ssl_http_server PRIVATE
+        common
+        ${COMMON_LINK_LIBRARIES}
+)
+
+target_compile_options(ssl_http_server PRIVATE ${COMMON_COMPILE_OPTIONS})
+
+set_target_properties(ssl_http_server PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)

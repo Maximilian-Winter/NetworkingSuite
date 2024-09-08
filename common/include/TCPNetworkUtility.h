@@ -1,5 +1,6 @@
 #pragma once
 
+#include <asio/ssl.hpp>
 #include <asio.hpp>
 #include <functional>
 #include <memory>
@@ -12,9 +13,10 @@
 
 class TCPNetworkUtility {
 public:
+
     template<typename SendFraming, typename ReceiveFraming>
     class Session : public std::enable_shared_from_this<Session<SendFraming, ReceiveFraming>> {
-    private:
+    protected:
         asio::ip::tcp::socket socket_;
         std::string sessionUuid_;
         asio::strand<asio::io_context::executor_type> strand_;
@@ -28,6 +30,8 @@ public:
         ByteVector read_buffer_;
 
     public:
+        virtual ~Session() = default;
+
         auto get_shared_this() {
             return this->std::enable_shared_from_this<Session>::template shared_from_this();
         }
@@ -82,8 +86,8 @@ public:
         SendFraming& getSendFraming() { return send_framing_; }
         ReceiveFraming& getReceiveFraming() { return receive_framing_; }
 
-    private:
-        void do_read() {
+    protected:
+        virtual void do_read() {
             auto read_buffer = buffer_pool_->acquire();
             socket_.async_read_some(
                 asio::buffer(*read_buffer),
@@ -122,7 +126,7 @@ public:
             }
         }
 
-        void do_write() {
+        virtual void do_write() {
             if (is_closed()) {
                 return;
             }
@@ -229,4 +233,126 @@ public:
 
         return session;
     }
+
+     template<typename SendFraming, typename ReceiveFraming>
+    class SSLSession : public Session<SendFraming, ReceiveFraming> {
+    private:
+        asio::ssl::stream<asio::ip::tcp::socket> ssl_socket_;
+
+    public:
+        SSLSession(asio::io_context& io_context, asio::ssl::context& ssl_context, const json senderFramingInitialData, const json receiveFramingInitialData)
+            : Session<SendFraming, ReceiveFraming>(io_context, senderFramingInitialData, receiveFramingInitialData),
+              ssl_socket_(io_context, ssl_context) {}
+
+        void start(const std::function<void(const ByteVector&)>& messageHandler,
+                   const std::function<void(std::shared_ptr<SSLSession>)>& closedCallback) {
+            auto self = this->shared_from_this();
+            ssl_socket_.async_handshake(asio::ssl::stream_base::server,
+                [this, self, messageHandler, closedCallback](const asio::error_code& error) {
+                    if (!error) {
+                        Session<SendFraming, ReceiveFraming>::start(messageHandler,
+                            [closedCallback](std::shared_ptr<Session<SendFraming, ReceiveFraming>> session) {
+                                closedCallback(std::static_pointer_cast<SSLSession>(session));
+                            });
+                    } else {
+                        LOG_ERROR("SSL handshake failed: %s", error.message().c_str());
+                        this->close();
+                    }
+                });
+        }
+
+        void do_read() override {
+            auto read_buffer = this->buffer_pool_->acquire();
+            asio::async_read(ssl_socket_,
+                asio::buffer(*read_buffer),
+                asio::bind_executor(this->strand_, [this, self = this->shared_from_this(), read_buffer](
+                    const asio::error_code& ec, std::size_t bytes_transferred) {
+                    if (!ec) {
+                        read_buffer->resize(bytes_transferred);
+                        this->process_read_data(*read_buffer);
+                        this->do_read();
+                    } else if (ec != asio::error::operation_aborted) {
+                        LOG_DEBUG("Error in SSL read: %s", ec.message().c_str());
+                        this->close();
+                    }
+                    this->buffer_pool_->release(read_buffer);
+                }));
+        }
+
+        void do_write() override {
+            if (this->is_closed()) {
+                return;
+            }
+
+            auto buffer = this->write_queue_.pop();
+            if (!buffer) {
+                return;
+            }
+
+            asio::async_write(ssl_socket_, asio::buffer(**buffer),
+                asio::bind_executor(this->strand_, [this, self = this->shared_from_this(), buffer](
+                    const asio::error_code& ec, std::size_t bytes_written) {
+                    this->buffer_pool_->release(*buffer);
+
+                    if (!ec) {
+                        LOG_DEBUG("Wrote %zu bytes over SSL", bytes_written);
+                        if (!this->write_queue_.empty()) {
+                            this->do_write();
+                        }
+                    } else if (ec != asio::error::operation_aborted) {
+                        LOG_DEBUG("Error in SSL write: %s", ec.message().c_str());
+                        this->close();
+                    }
+                }));
+        }
+    };
+public:
+    template<typename SendFraming, typename ReceiveFraming>
+    static std::shared_ptr<SSLSession<SendFraming, ReceiveFraming>> createSSLSession(
+        asio::io_context& io_context, asio::ssl::context& ssl_context,
+        const json senderFramingInitialData, const json receiveFramingInitialData) {
+        return std::make_shared<SSLSession<SendFraming, ReceiveFraming>>(
+            io_context, ssl_context, senderFramingInitialData, receiveFramingInitialData);
+    }
+
+    template<typename SendFraming, typename ReceiveFraming>
+    static std::shared_ptr<SSLSession<SendFraming, ReceiveFraming>> connectSSL(
+        asio::io_context& io_context, asio::ssl::context& ssl_context,
+        const std::string& host, const std::string& port,
+        const std::function<void(std::error_code, std::shared_ptr<SSLSession<SendFraming, ReceiveFraming>>)>& callback,
+        const std::function<void(std::shared_ptr<SSLSession<SendFraming, ReceiveFraming>> session, ByteVector message)>& messageCallback,
+        const std::function<void(std::shared_ptr<SSLSession<SendFraming, ReceiveFraming>>)>& closedCallback,
+        const json& senderFramingInitialData, const json& receiveFramingInitialData) {
+
+        auto session = std::make_shared<SSLSession<SendFraming, ReceiveFraming>>(
+            io_context, ssl_context, senderFramingInitialData, receiveFramingInitialData);
+
+        asio::ip::tcp::resolver resolver(io_context);
+        auto endpoints = resolver.resolve(host, port);
+
+        asio::async_connect(session->socket(), endpoints,
+            [session, callback, closedCallback, messageCallback](const std::error_code& ec, const asio::ip::tcp::endpoint&) {
+                if (!ec) {
+                    session->ssl_socket_.async_handshake(asio::ssl::stream_base::client,
+                        [session, callback, closedCallback, messageCallback](const std::error_code& handshake_ec) {
+                            if (!handshake_ec) {
+                                session->start(
+                                    [session, messageCallback](const ByteVector& data) {
+                                        messageCallback(session, data);
+                                    },
+                                    closedCallback
+                                );
+                                callback(handshake_ec, session);
+                            } else {
+                                callback(handshake_ec, nullptr);
+                            }
+                        });
+                } else {
+                    callback(ec, nullptr);
+                }
+            });
+
+        return session;
+    }
+
 };
