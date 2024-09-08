@@ -9,10 +9,11 @@
 #include "MessageFraming.h"
 #include "Utilities.h"
 
+
 class TCPNetworkUtility {
 public:
-
-    class Session : public std::enable_shared_from_this<Session> {
+    template<typename SendFraming, typename ReceiveFraming>
+    class Session : public std::enable_shared_from_this<Session<SendFraming, ReceiveFraming>> {
     private:
         asio::ip::tcp::socket socket_;
         std::string sessionUuid_;
@@ -22,18 +23,21 @@ public:
         std::atomic<bool> is_closed_{false};
         std::function<void(std::shared_ptr<Session>)> connection_closed_callback_;
         std::function<void(const ByteVector&)> message_handler_;
-        std::shared_ptr<MessageFraming> message_framing_;
+        SendFraming send_framing_;
+        ReceiveFraming receive_framing_;
         ByteVector read_buffer_;
 
     public:
-        explicit Session(asio::io_context& io_context, std::shared_ptr<MessageFraming> framing)
+        auto get_shared_this() {
+            return this->std::enable_shared_from_this<Session>::template shared_from_this();
+        }
+        explicit Session(asio::io_context& io_context)
             : socket_(io_context),
               strand_(asio::make_strand(io_context)),
               buffer_pool_(std::make_shared<BufferPool>(8192)),
-              message_framing_(std::move(framing)),
-        sessionUuid_(Utilities::generateUuid())
+              sessionUuid_(Utilities::generateUuid())
         {
-            read_buffer_.reserve(buffer_pool_->getBufferSize() + message_framing_->getMaxFramingOverhead());
+            read_buffer_.reserve(buffer_pool_->getBufferSize() + receive_framing_.getMaxFramingOverhead());
         }
 
         void start(const std::function<void(const ByteVector&)>& messageHandler,
@@ -47,10 +51,7 @@ public:
 
         asio::ip::tcp::socket& socket() { return socket_; }
 
-        std::string getSessionUuid()
-        {
-            return sessionUuid_;
-        }
+        std::string getSessionUuid() { return sessionUuid_; }
 
         void write(const ByteVector& message) {
             if (is_closed()) {
@@ -58,7 +59,7 @@ public:
             }
 
             ByteVector* buffer = buffer_pool_->acquire();
-            *buffer = message_framing_->frameMessage(message);
+            *buffer = send_framing_.frameMessage(message);
 
             asio::post(strand_, [this, buffer]() {
                 write_queue_.push(buffer);
@@ -73,17 +74,20 @@ public:
                 return;
             }
 
-            asio::post(strand_, [this, self = shared_from_this()]() {
+            asio::post(strand_, [this, self = get_shared_this()]() {
                 do_close();
             });
         }
+
+        SendFraming& getSendFraming() { return send_framing_; }
+        ReceiveFraming& getReceiveFraming() { return receive_framing_; }
 
     private:
         void do_read() {
             auto read_buffer = buffer_pool_->acquire();
             socket_.async_read_some(
                 asio::buffer(*read_buffer),
-                asio::bind_executor(strand_, [this, self = shared_from_this(), read_buffer](
+                asio::bind_executor(strand_, [this, self = get_shared_this(), read_buffer](
                     const asio::error_code& ec, std::size_t bytes_transferred) {
                     if (!ec) {
                         read_buffer->resize(bytes_transferred);
@@ -101,9 +105,9 @@ public:
             read_buffer_.insert(read_buffer_.end(), new_data.begin(), new_data.end());
 
             while (true) {
-                if (message_framing_->isCompleteMessage(read_buffer_)) {
-                    ByteVector message = message_framing_->extractMessage(read_buffer_);
-                    ByteVector message_size = message_framing_->frameMessage(message);
+                if (receive_framing_.isCompleteMessage(read_buffer_)) {
+                    ByteVector message = receive_framing_.extractMessage(read_buffer_);
+                    ByteVector message_size = receive_framing_.frameMessage(message);
                     read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + static_cast<int>(message_size.size()));
 
                     message_handler_(message);
@@ -129,7 +133,7 @@ public:
             }
 
             asio::async_write(socket_, asio::buffer(**buffer),
-                asio::bind_executor(strand_, [this, self = shared_from_this(), buffer](
+                asio::bind_executor(strand_, [this, self = get_shared_this(), buffer](
                     const asio::error_code& ec, std::size_t bytes_written) {
                     buffer_pool_->release(*buffer);
 
@@ -145,45 +149,67 @@ public:
                 }));
         }
 
-        void do_close() {
-            while (auto buffer = write_queue_.pop()) {
-                buffer_pool_->release(*buffer);
+        void do_close()
+        {
+            // Clear the write queue
+            while (auto opt_buffer = write_queue_.pop()) {
+                buffer_pool_->release(*opt_buffer);
+            }
+
+            if (!socket_.is_open())
+            {
+                if (connection_closed_callback_)
+                {
+                    connection_closed_callback_(get_shared_this());
+                }
+                return; // Socket is already closed
             }
 
             std::error_code ec;
+
+            // Cancel any pending asynchronous operations
+            socket_.cancel(ec);
+            if (ec)
+            {
+                LOG_ERROR("Error cancelling pending operations: %s", ec.message().c_str());
+            }
+
+            // Shutdown the socket
             socket_.shutdown(asio::ip::tcp::socket::shutdown_both, ec);
-            if (ec) {
+            if (ec && ec != asio::error::not_connected)
+            {
                 LOG_ERROR("Error shutting down socket: %s", ec.message().c_str());
             }
 
+            // Close the socket
             socket_.close(ec);
-            if (ec) {
+            if (ec)
+            {
                 LOG_ERROR("Error closing socket: %s", ec.message().c_str());
             }
 
-            if (connection_closed_callback_) {
-                connection_closed_callback_(shared_from_this());
+            if (connection_closed_callback_)
+            {
+                connection_closed_callback_(get_shared_this());
             }
         }
-
     };
-
-    static std::shared_ptr<Session> createSession(asio::io_context& io_context, asio::ip::tcp::socket& socket, const std::shared_ptr<MessageFraming>& framing) {
-        auto session = std::make_shared<Session>(io_context, framing);
+    template<typename SendFraming, typename ReceiveFraming>
+    static std::shared_ptr<Session<SendFraming, ReceiveFraming>> createSession(asio::io_context& io_context, asio::ip::tcp::socket& socket) {
+        auto session = std::make_shared<Session<SendFraming, ReceiveFraming>>(io_context);
         session->socket() = std::move(socket);
         return session;
     }
-
-    static std::shared_ptr<Session> connect(
+    template<typename SendFraming, typename ReceiveFraming>
+    static std::shared_ptr<Session<SendFraming, ReceiveFraming>> connect(
         asio::io_context& io_context,
         const std::string& host,
         const std::string& port,
-        const std::shared_ptr<MessageFraming>& framing,
-        const std::function<void(std::error_code, std::shared_ptr<Session>)>& callback,
-        const std::function<void(std::shared_ptr<Session> session, ByteVector message)>& messageCallback,
-        const std::function<void(std::shared_ptr<Session>)>& closedCallback) {
+        const std::function<void(std::error_code, std::shared_ptr<Session<SendFraming, ReceiveFraming>>)>& callback,
+        const std::function<void(std::shared_ptr<Session<SendFraming, ReceiveFraming>> session, ByteVector message)>& messageCallback,
+        const std::function<void(std::shared_ptr<Session<SendFraming, ReceiveFraming>>)>& closedCallback) {
 
-        auto session = std::make_shared<Session>(io_context, framing);
+        auto session = std::make_shared<Session<SendFraming, ReceiveFraming>>(io_context);
 
         asio::ip::tcp::resolver resolver(io_context);
         auto endpoints = resolver.resolve(host, port);

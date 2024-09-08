@@ -17,12 +17,11 @@ public:
 
     HTTPClient(const Config& config)
         : thread_pool_(std::make_shared<AsioThreadPool>(1)),
-          framing_(std::make_shared<HTTPMessageFraming>(HTTPMessageFraming::MessageType::REQUEST)),
-          client_(thread_pool_, framing_, config) {
+          client_(thread_pool_, config) {
 
         tcp_handler_ = std::make_shared<HTTPMessageHandler>();
 
-        tcp_handler_->registerHandler(0, [this](const std::shared_ptr<TCPNetworkUtility::Session>& session, const ByteVector& data) {
+        tcp_handler_->registerHandler(0, [this](const std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming, HTTPMessageFraming>>& session, const ByteVector& data) {
             handleHTTPResponse(session, data);
         });
 
@@ -37,8 +36,8 @@ public:
         auto promise = std::make_shared<std::promise<HTTPResponse>>();
         auto future = promise->get_future();
 
-        client_.connectTCP(host, std::to_string(port),
-            [this, method, host, path, headers, body, promise](std::error_code ec, std::shared_ptr<TCPNetworkUtility::Session> session) {
+        client_.connectTCP<HTTPMessageFraming, HTTPMessageFraming>(host, std::to_string(port),
+            [this, method, host, path, headers, body, promise](std::error_code ec, std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming, HTTPMessageFraming>> session) {
                 if (!ec) {
                     std::cout << "Connected to HTTP server" << std::endl;
                     sendHTTPRequest(session, method, host, path, headers, body, promise);
@@ -48,7 +47,7 @@ public:
                 }
             },
             tcp_handler_,
-            [](std::shared_ptr<TCPNetworkUtility::Session> session) {
+            [](std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming, HTTPMessageFraming>> session) {
                 std::cout << "HTTP connection closed" << std::endl;
             }
         );
@@ -57,23 +56,23 @@ public:
     }
 
 private:
-    void sendHTTPRequest(const std::shared_ptr<TCPNetworkUtility::Session>& session, const std::string& method, const std::string& host, const std::string& path, const std::unordered_map<std::string, std::string>& headers, const std::string& body, std::shared_ptr<std::promise<HTTPResponse>> promise) {
-        std::dynamic_pointer_cast<HTTPMessageFraming>(framing_)->setMessageType(HTTPMessageFraming::MessageType::REQUEST);
-        std::dynamic_pointer_cast<HTTPMessageFraming>(framing_)->setRequestMethod(method);
-        std::dynamic_pointer_cast<HTTPMessageFraming>(framing_)->setContentType("plain/text");
-        std::dynamic_pointer_cast<HTTPMessageFraming>(framing_)->setRequestPath(path);
+    void sendHTTPRequest(const std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming, HTTPMessageFraming>>& session, const std::string& method, const std::string& host, const std::string& path, const std::unordered_map<std::string, std::string>& headers, const std::string& body, std::shared_ptr<std::promise<HTTPResponse>> promise) {
+        session->getSendFraming().setMessageType(HTTPMessageFraming::MessageType::REQUEST);
+        session->getSendFraming().setRequestMethod(method);
+        session->getSendFraming().setContentType("plain/text");
+        session->getSendFraming().setRequestPath(path);
 
         std::unordered_map<std::string, std::string> all_headers = headers;
         all_headers["Content-Length"] = std::to_string(body.length());
-        std::dynamic_pointer_cast<HTTPMessageFraming>(framing_)->setHeaders(all_headers);
+        session->getSendFraming().setHeaders(all_headers);
 
         session->write(ByteVector(body.begin(), body.end()));
 
         pending_responses_[session->getSessionUuid()] = promise;
     }
 
-    void handleHTTPResponse(const std::shared_ptr<TCPNetworkUtility::Session>& session, const ByteVector& data) {
-        ByteVector last_message = std::dynamic_pointer_cast<HTTPMessageFraming>(framing_)->getFullLastMessage();
+    void handleHTTPResponse(const std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming, HTTPMessageFraming>>& session, const ByteVector& data) {
+        ByteVector last_message = session->getReceiveFraming().getFullLastMessage();
         std::string response(last_message.begin(), last_message.end());
         std::istringstream response_stream(response);
 
@@ -105,7 +104,6 @@ private:
     }
 
     std::shared_ptr<AsioThreadPool> thread_pool_;
-    std::shared_ptr<HTTPMessageFraming> framing_;
     Client client_;
     std::shared_ptr<HTTPMessageHandler> tcp_handler_;
     std::unordered_map<std::string, std::shared_ptr<std::promise<HTTPResponse>>> pending_responses_;

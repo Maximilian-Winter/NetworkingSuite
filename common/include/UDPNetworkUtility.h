@@ -1,18 +1,18 @@
-//
-// Created by maxim on 07.09.2024.
-//
-
 #pragma once
 
 #include <asio.hpp>
 #include <functional>
 #include <memory>
 #include <atomic>
+#include "BufferPool.h"
+#include "Logger.h"
+#include "Utilities.h"
 
 
 class UDPNetworkUtility {
 public:
-    class Connection : public std::enable_shared_from_this<Connection> {
+    template<typename SendFraming, typename ReceiveFraming>
+    class Connection : public std::enable_shared_from_this<Connection<SendFraming, ReceiveFraming>> {
     private:
         asio::ip::udp::socket socket_;
         std::string connectionUuid_;
@@ -22,18 +22,21 @@ public:
         std::atomic<bool> is_closed_{false};
         std::function<void(std::shared_ptr<Connection>)> connection_closed_callback_;
         std::function<void(const ByteVector&)> receive_callback_;
-        std::shared_ptr<MessageFraming> message_framing_;
+        SendFraming send_framing_;
+        ReceiveFraming receive_framing_;
 
     public:
-        explicit Connection(asio::io_context& io_context, std::shared_ptr<MessageFraming> framing)
-            : socket_(io_context, asio::ip::udp::endpoint(asio::ip::udp::v4(), 0)), resolver(io_context),
+        explicit Connection(asio::io_context& io_context)
+            : socket_(io_context, asio::ip::udp::endpoint(asio::ip::udp::v4(), 0)),
+              resolver(io_context),
               strand_(asio::make_strand(io_context)),
               buffer_pool_(std::make_shared<BufferPool>(8192)),
-              message_framing_(std::move(framing)),
-        connectionUuid_(Utilities::generateUuid())
+              connectionUuid_(Utilities::generateUuid())
         {
         }
-
+        auto get_shared_this() {
+            return this->std::enable_shared_from_this<Connection>::template shared_from_this();
+        }
         void start(const std::function<void(const ByteVector&)>& receive_callback) {
             receive_callback_ = receive_callback;
             do_receive();
@@ -47,10 +50,7 @@ public:
 
         asio::ip::udp::socket& socket() { return socket_; }
 
-        std::string getConnectionUuid()
-        {
-            return connectionUuid_;
-        }
+        std::string getConnectionUuid() { return connectionUuid_; }
 
         void send(const ByteVector& message) {
             if (is_closed()) {
@@ -58,7 +58,7 @@ public:
             }
 
             ByteVector* buffer = buffer_pool_->acquire();
-            *buffer = message_framing_->frameMessage(message);
+            *buffer = send_framing_.frameMessage(message);
 
             asio::post(strand_, [this, buffer]() {
                 send_queue_.push(buffer);
@@ -73,13 +73,17 @@ public:
                 return;
             }
 
-            asio::post(strand_, [this, self = shared_from_this()]() {
+            asio::post(strand_, [this, self = get_shared_this()]() {
                 do_close();
             });
         }
 
+        SendFraming& getSendFraming() { return send_framing_; }
+        ReceiveFraming& getReceiveFraming() { return receive_framing_; }
+
         asio::ip::udp::resolver resolver;
         asio::ip::udp::endpoint endpoint;
+
     private:
         void do_receive() {
             if (!socket_.is_open()) {
@@ -88,13 +92,12 @@ public:
             }
             auto receive_buffer = buffer_pool_->acquire();
             receive_buffer->resize(buffer_pool_->getBufferSize());
-            std::string client_key = endpoint.address().to_string() + ":" +
-                                             std::to_string(endpoint.port());
+            std::string client_key = endpoint.address().to_string() + ":" + std::to_string(endpoint.port());
             LOG_DEBUG("Remote endpoint: %s", client_key.c_str());
 
             socket_.async_receive_from(
                 asio::buffer(*receive_buffer), endpoint,
-                asio::bind_executor(strand_, [this, self = shared_from_this(), receive_buffer](
+                asio::bind_executor(strand_, [this, self = get_shared_this(), receive_buffer](
                     const asio::error_code& ec, std::size_t bytes_received) {
                     if (!ec) {
                         receive_buffer->resize(bytes_received);
@@ -109,8 +112,8 @@ public:
         }
 
         void process_received_data(const ByteVector& data) {
-            if (message_framing_->isCompleteMessage(data)) {
-                ByteVector message = message_framing_->extractMessage(data);
+            if (receive_framing_.isCompleteMessage(data)) {
+                ByteVector message = receive_framing_.extractMessage(data);
                 receive_callback_(message);
             } else {
                 LOG_WARNING("Received incomplete or invalid message");
@@ -129,7 +132,7 @@ public:
 
             socket_.async_send_to(
                 asio::buffer(**buffer), endpoint,
-                asio::bind_executor(strand_, [this, self = shared_from_this(), buffer](
+                asio::bind_executor(strand_, [this, self = get_shared_this(), buffer](
                     const asio::error_code& ec, std::size_t bytes_sent) {
                     buffer_pool_->release(*buffer);
 
@@ -146,36 +149,67 @@ public:
         }
 
         void do_close() {
-            while (auto buffer = send_queue_.pop()) {
-                buffer_pool_->release(*buffer);
+            // Clear the write queue
+            while (auto opt_buffer = send_queue_.pop()) {
+                buffer_pool_->release(*opt_buffer);
+            }
+
+            if (!socket_.is_open())
+            {
+                if (connection_closed_callback_)
+                {
+                    connection_closed_callback_(get_shared_this());
+                }
+                return; // Socket is already closed
             }
 
             std::error_code ec;
+
+            // Cancel any pending asynchronous operations
+            socket_.cancel(ec);
+            if (ec)
+            {
+                LOG_ERROR("Error cancelling pending operations: %s", ec.message().c_str());
+            }
+
+            // Shutdown the socket
+            socket_.shutdown(asio::ip::tcp::socket::shutdown_both, ec);
+            if (ec && ec != asio::error::not_connected)
+            {
+                LOG_ERROR("Error shutting down socket: %s", ec.message().c_str());
+            }
+
+            // Close the socket
             socket_.close(ec);
-            if (ec) {
+            if (ec)
+            {
                 LOG_ERROR("Error closing socket: %s", ec.message().c_str());
             }
 
-            if (connection_closed_callback_) {
-                connection_closed_callback_(shared_from_this());
+            if (connection_closed_callback_)
+            {
+                connection_closed_callback_(get_shared_this());
             }
         }
     };
-    using MessageCallback = std::function<void(const std::shared_ptr<Connection>&, const ByteVector&)>;
-    static std::shared_ptr<Connection> create_connection(asio::io_context& io_context, std::shared_ptr<MessageFraming> framing) {
-        return std::make_shared<Connection>(io_context, std::move(framing));
+    template<typename SendFraming, typename ReceiveFraming>
+    using MessageCallback = std::function<void(const std::shared_ptr<Connection<SendFraming, ReceiveFraming>>&, const ByteVector&)>;
+
+    template<typename SendFraming, typename ReceiveFraming>
+    static std::shared_ptr<Connection<SendFraming, ReceiveFraming>> create_connection(asio::io_context& io_context) {
+        return std::make_shared<Connection<SendFraming, ReceiveFraming>>(io_context);
     }
 
-    static std::shared_ptr<Connection> connect(
+    template<typename SendFraming, typename ReceiveFraming>
+    static std::shared_ptr<Connection<SendFraming, ReceiveFraming>> connect(
         asio::io_context& io_context,
         const std::string& host,
         const std::string& port,
-        std::shared_ptr<MessageFraming> framing,
-        const std::function<void(std::error_code, std::shared_ptr<Connection>)>& callback,
-        const MessageCallback& messageCallback,
-        const std::function<void(std::shared_ptr<Connection>)>& closed_callback) {
+        const std::function<void(std::error_code, std::shared_ptr<Connection<SendFraming, ReceiveFraming>>)>& callback,
+        const MessageCallback<SendFraming, ReceiveFraming>& messageCallback,
+        const std::function<void(std::shared_ptr<Connection<SendFraming, ReceiveFraming>>)>& closed_callback) {
 
-        auto connection = create_connection(io_context, std::move(framing));
+        auto connection = create_connection<SendFraming, ReceiveFraming>(io_context);
         connection->set_closed_callback(closed_callback);
 
         auto endpoints = connection->resolver.resolve(asio::ip::udp::v4(), host, port);

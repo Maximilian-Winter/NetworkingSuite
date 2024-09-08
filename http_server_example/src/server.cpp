@@ -18,21 +18,20 @@ public:
 
     explicit HTTPServer(const Config& config, unsigned short port)
         : thread_pool_(std::make_shared<AsioThreadPool>(1)),
-          framing_(std::make_shared<HTTPMessageFraming>(HTTPMessageFraming::MessageType::RESPONSE)),
-          server_(thread_pool_, framing_, config) {
+          server_(thread_pool_, config) {
 
         auto tcp_handler = std::make_shared<HTTPMessageHandler>();
 
-        tcp_handler->registerHandler(0, [this](const std::shared_ptr<TCPNetworkUtility::Session>& session, const ByteVector& data) {
+        tcp_handler->registerHandler(0, [this](const std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming, HTTPMessageFraming>>& session, const ByteVector& data) {
             handleHTTPRequest(session, data);
         });
 
-        server_.addTCPPort(port,
-            [](std::shared_ptr<TCPNetworkUtility::Session> session) {
+        server_.addTCPPort<HTTPMessageFraming,HTTPMessageFraming>(port,
+            [](std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming,HTTPMessageFraming>> session) {
                 std::cout << "New HTTP connection: " << session->getSessionUuid() << std::endl;
             },
             tcp_handler,
-            [](std::shared_ptr<TCPNetworkUtility::Session> session) {
+            [](std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming,HTTPMessageFraming>> session) {
                 std::cout << "HTTP connection closed: " << session->getSessionUuid() << std::endl;
             }
         );
@@ -51,11 +50,11 @@ public:
     }
 
 private:
-    void handleHTTPRequest(const std::shared_ptr<TCPNetworkUtility::Session>& session, const ByteVector& data) {
+    void handleHTTPRequest(const std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming,HTTPMessageFraming>>& session, const ByteVector& data) {
 
-        std::string method = std::dynamic_pointer_cast<HTTPMessageFraming>(framing_)->getRequestMethod();
-        std::string path = std::dynamic_pointer_cast<HTTPMessageFraming>(framing_)->getRequestPath();
-        std::string http_version = std::dynamic_pointer_cast<HTTPMessageFraming>(framing_)->getHttpVersion();
+        std::string method = session->getReceiveFraming().getRequestMethod();
+        std::string path = session->getReceiveFraming().getRequestPath();
+        std::string http_version = session->getReceiveFraming().getHttpVersion();
 
         std::unordered_map<std::string, std::string> headers;
 
@@ -74,11 +73,11 @@ private:
             response = "404 Not Found";
             response_headers["Content-Type"] = "text/plain";
         }
-        std::dynamic_pointer_cast<HTTPMessageFraming>(framing_)->setMessageType(HTTPMessageFraming::MessageType::RESPONSE);
+        session->getSendFraming().setMessageType(HTTPMessageFraming::MessageType::RESPONSE);
 
-        std::dynamic_pointer_cast<HTTPMessageFraming>(framing_)->setContentType("plain/text");
+        session->getSendFraming().setContentType("plain/text");
         // Set headers for framing
-        std::dynamic_pointer_cast<HTTPMessageFraming>(framing_)->setHeaders(response_headers);
+        session->getSendFraming().setHeaders(response_headers);
 
         // Frame the response using HTTPMessageFraming
         //auto framed_response = framing_->frameMessage(ByteVector(response.begin(), response.end()));
@@ -87,7 +86,6 @@ private:
     }
 
     std::shared_ptr<AsioThreadPool> thread_pool_;
-    std::shared_ptr<HTTPMessageFraming> framing_;
     Server server_;
     std::unordered_map<std::string, RequestHandler> routes_;
 };

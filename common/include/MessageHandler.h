@@ -18,6 +18,7 @@ public:
 
     using MessageCallback = std::function<void(const EndpointType&, const ByteVector&)>;
 
+
     virtual void registerHandler(short messageType, MessageCallback callback) = 0;
 
     virtual void handleMessage(const EndpointType& endpoint, const ByteVector& data) = 0;
@@ -25,10 +26,12 @@ public:
 protected:
 
 };
-class TCPMessageHandler: MessageHandler<std::shared_ptr<TCPNetworkUtility::Session>>
+
+template<typename SendFraming, typename ReceiveFraming>
+class TCPMessageHandler: MessageHandler<std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>>>
 {
 public:
-    void handleMessage(const std::shared_ptr<TCPNetworkUtility::Session> &endpoint, const ByteVector &data) override
+    void handleMessage(const std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>> &endpoint, const ByteVector &data) override
     {
         try {
             NetworkMessages::MessageTypeData typeData;
@@ -47,22 +50,23 @@ public:
         }
     }
 
-    void registerHandler(short messageType, MessageCallback callback) override{
+    void registerHandler(short messageType, typename MessageHandler<std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>>>::MessageCallback callback) override{
         m_handlers[messageType] = std::move(callback);
     }
 
 private:
 
-    std::unordered_map<short, MessageCallback> m_handlers;
+    std::unordered_map<short, typename MessageHandler<std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>>>::MessageCallback> m_handlers;
 };
 
-class UDPMessageHandler: MessageHandler<std::shared_ptr<UDPNetworkUtility::Connection>>
+template<typename SendFraming, typename ReceiveFraming>
+class UDPMessageHandler: MessageHandler<std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>>>
 {
 public:
-    void registerHandler(short messageType, MessageCallback callback) override{
+    void registerHandler(short messageType, typename MessageHandler<std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>>>::MessageCallback callback) override{
         m_handlers[messageType] = std::move(callback);
     }
-    void handleMessage(const std::shared_ptr<UDPNetworkUtility::Connection> &endpoint, const ByteVector &data) override
+    void handleMessage(const std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>> &endpoint, const ByteVector &data) override
     {
         try {
             NetworkMessages::MessageTypeData typeData;
@@ -82,7 +86,7 @@ public:
     }
 private:
 
-    std::unordered_map<short, MessageCallback> m_handlers;
+    std::unordered_map<short, typename MessageHandler<std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>>>::MessageCallback> m_handlers;
 };
 
 

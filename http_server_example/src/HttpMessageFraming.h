@@ -7,11 +7,22 @@
 
 class HTTPMessageFraming : public MessageFraming {
 public:
+
+
     enum class MessageType {
         REQUEST,
         RESPONSE,
         UNKNOWN
     };
+
+    HTTPMessageFraming(){
+        if (!connectionData_) {
+            connectionData_ = std::make_shared<json>();
+        }
+        (*connectionData_)["headers"] = std::unordered_map<std::string, std::string>();
+        (*connectionData_)["message_type"] = MessageType::REQUEST;
+        (*connectionData_)["content_type"] = "plain/text";
+    }
 
     HTTPMessageFraming(MessageType message_type)
     {
