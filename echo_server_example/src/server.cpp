@@ -27,7 +27,7 @@ public:
         framingInitialData["magic_number_start"] = 42;
         framingInitialData["magic_number_end"] = 24;
 
-        server_.addTCPPort<MagicNumberFraming, MagicNumberFraming>(8080,
+        server_.addTcpPort<MagicNumberFraming, MagicNumberFraming>(8080,
             [](std::shared_ptr<TCPNetworkUtility::Session<MagicNumberFraming, MagicNumberFraming>> session) {
                 std::cout << "New TCP connection: " << session->getSessionUuid() << std::endl;
             },
@@ -37,7 +37,7 @@ public:
             },framingInitialData, framingInitialData
         );
 
-        server_.addUDPPort<MagicNumberFraming, MagicNumberFraming>(8081,
+        server_.addUdpPort<MagicNumberFraming, MagicNumberFraming>(8081,
             [](std::shared_ptr<UDPNetworkUtility::Connection<MagicNumberFraming, MagicNumberFraming>> connection) {
                 std::cout << "New UDP connection: " << connection->getConnectionUuid() << std::endl;
             },

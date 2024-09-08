@@ -23,39 +23,39 @@ public:
 
         setupSSLContext(config);
 
-        auto tcp_handler = std::make_shared<HTTPMessageHandler>();
-        tcp_handler->registerHandler(0, [this](const std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming, HTTPMessageFraming>>& session, const ByteVector& data) {
+        auto tcp_handler = std::make_shared<HttpMessageHandler>();
+        tcp_handler->registerHandler(0, [this](const std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
             handleHTTPRequest(session, data);
         });
 
         // HTTP
-        server_.addTCPPort<HTTPMessageFraming, HTTPMessageFraming>(http_port,
-            [](std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming, HTTPMessageFraming>> session) {
+        server_.addTcpPort<HttpMessageFraming, HttpMessageFraming>(http_port,
+            [](std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>> session) {
                 std::cout << "New HTTP connection: " << session->getSessionUuid() << std::endl;
             },
             tcp_handler,
-            [](std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming, HTTPMessageFraming>> session) {
+            [](std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>> session) {
                 std::cout << "HTTP connection closed: " << session->getSessionUuid() << std::endl;
             }, {}, {}
         );
 
         // HTTPS
-        server_.addTCPPort<HTTPMessageFraming, HTTPMessageFraming>(https_port,
-            [this](std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming, HTTPMessageFraming>> session) {
+        server_.addTcpPort<HttpMessageFraming, HttpMessageFraming>(https_port,
+            [this](std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>> session) {
                 std::cout << "New HTTPS connection: " << session->getSessionUuid() << std::endl;
-                auto ssl_session = TCPNetworkUtility::createSSLSession<HTTPMessageFraming, HTTPMessageFraming>(
+                auto ssl_session = TCPNetworkUtility::createSSLSession<HttpMessageFraming, HttpMessageFraming>(
                     thread_pool_->get_io_context(), ssl_context_, {}, {});
                 ssl_session->start(
                     [this, ssl_session](const ByteVector& data) {
                         handleHTTPRequest(ssl_session, data);
                     },
-                    [](std::shared_ptr<TCPNetworkUtility::SSLSession<HTTPMessageFraming, HTTPMessageFraming>> session) {
+                    [](std::shared_ptr<TCPNetworkUtility::SSLSession<HttpMessageFraming, HttpMessageFraming>> session) {
                         std::cout << "HTTPS connection closed: " << session->getSessionUuid() << std::endl;
                     }
                 );
             },
             tcp_handler,
-            [](std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming, HTTPMessageFraming>> session) {
+            [](std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>> session) {
                 std::cout << "HTTPS connection closed: " << session->getSessionUuid() << std::endl;
             }, {}, {}
         );
@@ -85,7 +85,7 @@ private:
         ssl_context_.use_tmp_dh_file(config.get<std::string>("ssl_dh_file", "dh2048.pem"));
     }
 
-    void handleHTTPRequest(const std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming,HTTPMessageFraming>>& session, const ByteVector& data) {
+    void handleHTTPRequest(const std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming,HttpMessageFraming>>& session, const ByteVector& data) {
 
         std::string method = session->getReceiveFraming().getRequestMethod();
         std::string path = session->getReceiveFraming().getRequestPath();
@@ -108,7 +108,7 @@ private:
             response = "404 Not Found";
             response_headers["Content-Type"] = "text/plain";
         }
-        session->getSendFraming().setMessageType(HTTPMessageFraming::MessageType::RESPONSE);
+        session->getSendFraming().setMessageType(HttpMessageFraming::MessageType::RESPONSE);
 
         // Set headers for framing
         session->getSendFraming().setHeaders(response_headers);

@@ -12,26 +12,36 @@
 #include <functional>
 #include <sstream>
 
-class HTTPServer {
+class HttpServer {
 public:
     using RequestHandler = std::function<void(const std::string&, const std::unordered_map<std::string, std::string>&, const std::string&, std::string&, std::unordered_map<std::string, std::string>&)>;
 
-    explicit HTTPServer(const Config& config, unsigned short port)
+    explicit HttpServer(const Config& config, unsigned short port, unsigned short ssl_port)
         : thread_pool_(std::make_shared<AsioThreadPool>(1)),
           server_(thread_pool_, config) {
 
-        auto tcp_handler = std::make_shared<HTTPMessageHandler>();
+        auto tcp_handler = std::make_shared<HttpMessageHandler>();
 
-        tcp_handler->registerHandler(0, [this](const std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming, HTTPMessageFraming>>& session, const ByteVector& data) {
+        tcp_handler->registerHandler(0, [this](const std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
             handleHTTPRequest(session, data);
         });
 
-        server_.addTCPPort<HTTPMessageFraming,HTTPMessageFraming>(port,
-            [](std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming,HTTPMessageFraming>> session) {
+        server_.addTcpPort<HttpMessageFraming,HttpMessageFraming>(port,
+            [](std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming,HttpMessageFraming>> session) {
                 std::cout << "New HTTP connection: " << session->getSessionUuid() << std::endl;
             },
             tcp_handler,
-            [](std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming,HTTPMessageFraming>> session) {
+            [](std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming,HttpMessageFraming>> session) {
+                std::cout << "HTTP connection closed: " << session->getSessionUuid() << std::endl;
+            }, {}, {}
+        );
+        auto ssl_handler = std::make_shared<SSLHttpMessageHandler<HttpMessageFraming, HttpMessageFraming>>();
+        server_.addSslTcpPort<HttpMessageFraming,HttpMessageFraming>(ssl_port,
+            [](std::shared_ptr<SSLNetworkUtility::Session<HttpMessageFraming,HttpMessageFraming>> session) {
+                std::cout << "New HTTP connection: " << session->getSessionUuid() << std::endl;
+            },
+            ssl_handler,
+            [](std::shared_ptr<SSLNetworkUtility::Session<HttpMessageFraming,HttpMessageFraming>> session) {
                 std::cout << "HTTP connection closed: " << session->getSessionUuid() << std::endl;
             }, {}, {}
         );
@@ -50,7 +60,7 @@ public:
     }
 
 private:
-    void handleHTTPRequest(const std::shared_ptr<TCPNetworkUtility::Session<HTTPMessageFraming,HTTPMessageFraming>>& session, const ByteVector& data) {
+    void handleHTTPRequest(const std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming,HttpMessageFraming>>& session, const ByteVector& data) {
 
         std::string method = session->getReceiveFraming().getRequestMethod();
         std::string path = session->getReceiveFraming().getRequestPath();
@@ -73,7 +83,7 @@ private:
             response = "404 Not Found";
             response_headers["Content-Type"] = "text/plain";
         }
-        session->getSendFraming().setMessageType(HTTPMessageFraming::MessageType::RESPONSE);
+        session->getSendFraming().setMessageType(HttpMessageFraming::MessageType::RESPONSE);
 
         // Set headers for framing
         session->getSendFraming().setHeaders(response_headers);
@@ -95,7 +105,7 @@ int main() {
     // Load configuration if needed
     // config.load("http_server_config.json");
 
-    HTTPServer server(config, 8080);
+    HttpServer server(config, 8080, 8443);
 
     server.addRoute("/", [](const std::string& method, const std::unordered_map<std::string, std::string>& headers, const std::string& body, std::string& response, std::unordered_map<std::string, std::string>& response_headers) {
         response = "<html><body><h1>Welcome to the HTTP Server</h1></body></html>";

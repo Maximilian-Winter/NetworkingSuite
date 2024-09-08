@@ -12,9 +12,9 @@ int main() {
     // config.load("http_server_config.json");
 
     // Add SSL certificate and key file paths to the config
-    config.set("ssl_cert_file", "path/to/your/server.crt");
-    config.set("ssl_key_file", "path/to/your/server.key");
-    config.set("ssl_dh_file", "path/to/your/dh2048.pem");
+    config.set("ssl_cert_file", "server.crt");
+    config.set("ssl_key_file", "server.key");
+    config.set("ssl_dh_file", "dh2048.pem");
 
     HTTPServer server(config, 8080, 8443);  // HTTP on 8080, HTTPS on 8443
 

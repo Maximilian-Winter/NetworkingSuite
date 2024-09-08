@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <string>
 
-class HTTPMessageFraming : public MessageFraming {
+class HttpMessageFraming : public MessageFraming {
 public:
     enum class MessageType {
         REQUEST,
@@ -13,7 +13,7 @@ public:
         UNKNOWN
     };
 
-    explicit HTTPMessageFraming(const json& initializingData): MessageFraming(initializingData){
+    explicit HttpMessageFraming(const json& initializingData): MessageFraming(initializingData){
         if (!connectionData_) {
             connectionData_ = std::make_shared<json>();
         }
@@ -22,7 +22,7 @@ public:
         (*connectionData_)["content_type"] = "plain/text";
     }
 
-    HTTPMessageFraming(const json& initializingData, MessageType message_type): MessageFraming(initializingData)
+    HttpMessageFraming(const json& initializingData, MessageType message_type): MessageFraming(initializingData)
     {
         if (!connectionData_) {
             connectionData_ = std::make_shared<json>();

@@ -7,6 +7,7 @@
 #include "BinaryData.h"
 #include "TCPNetworkUtility.h"
 #include "UDPNetworkUtility.h"
+#include "SSLNetworkUtility.h"
 #include <functional>
 #include <unordered_map>
 #include <memory>
