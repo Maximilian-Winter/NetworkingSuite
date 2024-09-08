@@ -1,0 +1,8 @@
+{
+  "thread_count": 4,
+  "http_port": 80,
+  "https_port": 443,
+  "ssl_cert_file": "server.crt",
+  "ssl_key_file": "server.key",
+  "ssl_dh_file": "dh2048.pem"
+}

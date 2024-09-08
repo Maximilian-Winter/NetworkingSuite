@@ -1,0 +1,8 @@
+{
+  "thread_count": 4,
+  "http_port": 80,
+  "https_port": 443,
+  "ssl_cert_file": "/etc/letsencrypt/live/holistic-games.com/fullchain.pem",
+  "ssl_key_file": "/etc/letsencrypt/live/holistic-games.com/privkey.pem",
+  "ssl_dh_file": "/etc/letsencrypt/live/holistic-games.com/dh2048.pem"
+}
