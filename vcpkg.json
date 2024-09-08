@@ -1,0 +1,8 @@
+{
+  "dependencies": [
+    "asio",
+    "nlohmann-json",
+    "openssl",
+    "curl"
+  ]
+}

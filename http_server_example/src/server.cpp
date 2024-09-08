@@ -5,7 +5,7 @@
 #pragma once
 
 #include "Server.h"
-#include "HTTPMessageFraming.h"
+#include "HttpMessageFraming.h"
 #include "HttpMessageHandler.h"
 #include "Config.h"
 #include <unordered_map>
@@ -35,8 +35,16 @@ public:
                 std::cout << "HTTP connection closed: " << session->getSessionUuid() << std::endl;
             }, {}, {}
         );
+
+        auto ssl_cert = config.get<std::string>("ssl_cert_file", "");
+        auto ssl_key = config.get<std::string>("ssl_key_file", "");
+        auto ssl_dh_file = config.get<std::string>("ssl_dh_file", "");
+
         auto ssl_handler = std::make_shared<SSLHttpMessageHandler<HttpMessageFraming, HttpMessageFraming>>();
-        server_.addSslTcpPort<HttpMessageFraming,HttpMessageFraming>(ssl_port,
+        ssl_handler->registerHandler(0, [this](const std::shared_ptr<SSLNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
+            handleHTTPSRequest(session, data);
+        });
+        server_.addSslTcpPort<HttpMessageFraming,HttpMessageFraming>(ssl_port, ssl_cert, ssl_key, ssl_dh_file,
             [](std::shared_ptr<SSLNetworkUtility::Session<HttpMessageFraming,HttpMessageFraming>> session) {
                 std::cout << "New HTTP connection: " << session->getSessionUuid() << std::endl;
             },
@@ -91,7 +99,37 @@ private:
 
         session->write(ByteVector(response.begin(), response.end()));
     }
+    void handleHTTPSRequest(const std::shared_ptr<SSLNetworkUtility::Session<HttpMessageFraming,HttpMessageFraming>>& session, const ByteVector& data) {
 
+        std::string method = session->getReceiveFraming().getRequestMethod();
+        std::string path = session->getReceiveFraming().getRequestPath();
+        std::string http_version = session->getReceiveFraming().getHttpVersion();
+
+        std::unordered_map<std::string, std::string> headers;
+
+        std::string body;
+        if (static_cast<int>(data.size()) > 0) {
+            body = std::string(data.begin(), data.end());
+        }
+
+        std::string response;
+        std::unordered_map<std::string, std::string> response_headers;
+
+        auto route_handler = routes_.find(path);
+        if (route_handler != routes_.end()) {
+            route_handler->second(method, headers, body, response, response_headers);
+        } else {
+            response = "404 Not Found";
+            response_headers["Content-Type"] = "text/plain";
+        }
+        session->getSendFraming().setMessageType(HttpMessageFraming::MessageType::RESPONSE);
+
+        // Set headers for framing
+        session->getSendFraming().setHeaders(response_headers);
+
+
+        session->write(ByteVector(response.begin(), response.end()));
+    }
     std::shared_ptr<AsioThreadPool> thread_pool_;
     Server server_;
     std::unordered_map<std::string, RequestHandler> routes_;
@@ -104,8 +142,10 @@ int main() {
     Config config;
     // Load configuration if needed
     // config.load("http_server_config.json");
-
-    HttpServer server(config, 8080, 8443);
+    config.set("ssl_cert_file", "/etc/letsencrypt/live/holistic-games.com/fullchain.pem");
+    config.set("ssl_key_file", "/etc/letsencrypt/live/holistic-games.com/privkey.pem");
+    config.set("ssl_dh_file", "dh2048.pem");
+    HttpServer server(config, 80, 443);
 
     server.addRoute("/", [](const std::string& method, const std::unordered_map<std::string, std::string>& headers, const std::string& body, std::string& response, std::unordered_map<std::string, std::string>& response_headers) {
         response = "<html><body><h1>Welcome to the HTTP Server</h1></body></html>";

@@ -37,8 +37,8 @@ public:
     }
 
     template<typename SendFraming, typename ReceiveFraming>
-    void addSslTcpPort(unsigned short port_number, const std::function<void(std::shared_ptr<SSLNetworkUtility::Session<SendFraming, ReceiveFraming>>)> &connectedCallback, const std::shared_ptr<SSLHttpMessageHandler<SendFraming, ReceiveFraming>> &handler, const std::function<void(std::shared_ptr<SSLNetworkUtility::Session<SendFraming, ReceiveFraming>>)>& close_callback, const json senderFramingInitialData, const json receiveFramingInitialData) {
-        auto tcp_port = std::make_shared<SslPort<SendFraming, ReceiveFraming>>(thread_pool_->get_io_context(), port_number,"server.crt", "server.key", "dh2048.pem", senderFramingInitialData, receiveFramingInitialData);
+    void addSslTcpPort(unsigned short port_number, const std::string& ssl_cert_file, const std::string& ssl_key_file, const std::string& ssl_dh_file, const std::function<void(std::shared_ptr<SSLNetworkUtility::Session<SendFraming, ReceiveFraming>>)> &connectedCallback, const std::shared_ptr<SSLHttpMessageHandler<SendFraming, ReceiveFraming>> &handler, const std::function<void(std::shared_ptr<SSLNetworkUtility::Session<SendFraming, ReceiveFraming>>)>& close_callback, const json senderFramingInitialData, const json receiveFramingInitialData) {
+        auto tcp_port = std::make_shared<SslPort<SendFraming, ReceiveFraming>>(thread_pool_->get_io_context(), port_number, ssl_cert_file, ssl_key_file, ssl_dh_file, senderFramingInitialData, receiveFramingInitialData);
         tcp_port->setConnectedCallback(connectedCallback);
         tcp_port->setMessageHandler(handler);
         tcp_port->setCloseCallback(close_callback);

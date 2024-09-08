@@ -68,3 +68,4 @@ Thumbs.db
 # Additional
 *.log
 
+/dh2048.pem

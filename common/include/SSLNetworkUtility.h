@@ -106,8 +106,7 @@ public:
 
         void do_read() {
             auto read_buffer = buffer_pool_->acquire();
-            asio::async_read(*ssl_socket_,
-                asio::buffer(*read_buffer),
+            ssl_socket_->async_read_some(asio::buffer(*read_buffer),
                 asio::bind_executor(strand_, [this, self = get_shared_this(), read_buffer](
                     const asio::error_code& ec, std::size_t bytes_transferred) {
                     if (!ec) {
@@ -153,7 +152,7 @@ public:
                 return;
             }
 
-            asio::async_write(ssl_socket_, asio::buffer(**buffer),
+            asio::async_write(*ssl_socket_, asio::buffer(**buffer),
                 asio::bind_executor(strand_, [this, self = get_shared_this(), buffer](
                     const asio::error_code& ec, std::size_t bytes_written) {
                     buffer_pool_->release(*buffer);

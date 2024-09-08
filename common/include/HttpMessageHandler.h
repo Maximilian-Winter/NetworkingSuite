@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <memory>
 
-#include "HTTPMessageFraming.h"
+#include "HttpMessageFraming.h"
 
 class HttpMessageHandler : public TCPMessageHandler<HttpMessageFraming, HttpMessageFraming> {
 public:
