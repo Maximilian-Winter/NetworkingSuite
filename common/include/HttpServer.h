@@ -61,7 +61,7 @@ private:
 
         auto tcp_handler = std::make_shared<HttpMessageHandler>();
 
-        tcp_handler->registerHandler(0, [this](const std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
+        tcp_handler->registerHandler([this](const std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
             handleHTTPRequest(session, data);
         });
 
@@ -88,7 +88,7 @@ private:
         }
 
         auto ssl_handler = std::make_shared<SSLHttpMessageHandler<HttpMessageFraming, HttpMessageFraming>>();
-        ssl_handler->registerHandler(0, [this](const std::shared_ptr<SSLNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
+        ssl_handler->registerHandler([this](const std::shared_ptr<SSLNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
             handleHTTPSRequest(session, data);
         });
 

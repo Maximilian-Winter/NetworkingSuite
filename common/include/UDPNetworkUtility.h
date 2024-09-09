@@ -1,3 +1,5 @@
+
+
 #pragma once
 
 #include <asio.hpp>
@@ -7,8 +9,9 @@
 #include "BufferPool.h"
 #include "Logger.h"
 #include "Utilities.h"
+#include "nlohmann/json.hpp"
 
-
+using json = nlohmann::json;
 class UDPNetworkUtility {
 public:
     template<typename SendFraming, typename ReceiveFraming>
@@ -24,19 +27,25 @@ public:
         std::function<void(const ByteVector&)> receive_callback_;
         SendFraming send_framing_;
         ReceiveFraming receive_framing_;
+        ByteVector receive_buffer_;
 
     public:
-        explicit Connection(asio::io_context& io_context, json senderFramingInitialData, json receiveFramingInitialData)
+        explicit Connection(asio::io_context& io_context, const json& senderFramingInitialData, const json& receiveFramingInitialData)
             : socket_(io_context, asio::ip::udp::endpoint(asio::ip::udp::v4(), 0)),
               connectionUuid_(Utilities::generateUuid()),
               strand_(asio::make_strand(io_context)),
               buffer_pool_(std::make_shared<BufferPool>(8192)),
-              resolver(io_context),send_framing_(senderFramingInitialData), receive_framing_(receiveFramingInitialData)
+              resolver(io_context),
+              send_framing_(senderFramingInitialData),
+              receive_framing_(receiveFramingInitialData)
         {
+            receive_buffer_.reserve(buffer_pool_->getBufferSize() + receive_framing_.getMaxFramingOverhead());
         }
+
         auto get_shared_this() {
-            return this->std::enable_shared_from_this<Connection>::template shared_from_this();
+            return this->std::enable_shared_from_this<Connection<SendFraming, ReceiveFraming>>::shared_from_this();
         }
+
         void start(const std::function<void(const ByteVector&)>& receive_callback) {
             receive_callback_ = receive_callback;
             do_receive();
@@ -92,8 +101,6 @@ public:
             }
             auto receive_buffer = buffer_pool_->acquire();
             receive_buffer->resize(buffer_pool_->getBufferSize());
-            std::string client_key = endpoint.address().to_string() + ":" + std::to_string(endpoint.port());
-            LOG_DEBUG("Remote endpoint: %s", client_key.c_str());
 
             socket_.async_receive_from(
                 asio::buffer(*receive_buffer), endpoint,
@@ -111,12 +118,24 @@ public:
                 }));
         }
 
-        void process_received_data(const ByteVector& data) {
-            if (receive_framing_.isCompleteMessage(data)) {
-                ByteVector message = receive_framing_.extractMessage(data);
-                receive_callback_(message);
-            } else {
-                LOG_WARNING("Received incomplete or invalid message");
+        void process_received_data(const ByteVector& new_data) {
+            receive_buffer_.insert(receive_buffer_.end(), new_data.begin(), new_data.end());
+
+            while (true) {
+                if (receive_framing_.isCompleteMessage(receive_buffer_)) {
+                    ByteVector message = receive_framing_.extractMessage(receive_buffer_);
+                    ByteVector message_size = receive_framing_.frameMessage(message);
+                    receive_buffer_.erase(receive_buffer_.begin(), receive_buffer_.begin() + static_cast<int>(message_size.size()));
+
+                    receive_callback_(message);
+                } else {
+                    break;
+                }
+            }
+
+            if (receive_buffer_.size() > buffer_pool_->getBufferSize()) {
+                LOG_WARNING("Receive buffer overflow, discarding old data");
+                receive_buffer_.erase(receive_buffer_.begin(), receive_buffer_.end() - buffer_pool_->getBufferSize());
             }
         }
 
@@ -192,13 +211,13 @@ public:
             }
         }
     };
+
     template<typename SendFraming, typename ReceiveFraming>
     using MessageCallback = std::function<void(const std::shared_ptr<Connection<SendFraming, ReceiveFraming>>&, const ByteVector&)>;
 
     template<typename SendFraming, typename ReceiveFraming>
-    static std::shared_ptr<Connection<SendFraming, ReceiveFraming>> create_connection(asio::io_context& io_context, json& senderFramingInitialData, json& receiveFramingInitialData) {
+    static std::shared_ptr<Connection<SendFraming, ReceiveFraming>> create_connection(asio::io_context& io_context, const json& senderFramingInitialData, const json& receiveFramingInitialData) {
         return std::make_shared<Connection<SendFraming, ReceiveFraming>>(io_context, senderFramingInitialData, receiveFramingInitialData);
-
     }
 
     template<typename SendFraming, typename ReceiveFraming>
@@ -208,7 +227,9 @@ public:
         const std::string& port,
         const std::function<void(std::error_code, std::shared_ptr<Connection<SendFraming, ReceiveFraming>>)>& callback,
         const MessageCallback<SendFraming, ReceiveFraming>& messageCallback,
-        const std::function<void(std::shared_ptr<Connection<SendFraming, ReceiveFraming>>)>& closed_callback, json& senderFramingInitialData, json& receiveFramingInitialData) {
+        const std::function<void(std::shared_ptr<Connection<SendFraming, ReceiveFraming>>)>& closed_callback,
+        const json& senderFramingInitialData,
+        const json& receiveFramingInitialData) {
 
         auto connection = create_connection<SendFraming, ReceiveFraming>(io_context, senderFramingInitialData, receiveFramingInitialData);
         connection->set_closed_callback(closed_callback);

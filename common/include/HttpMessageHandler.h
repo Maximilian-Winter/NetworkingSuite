@@ -15,7 +15,7 @@ class HttpMessageHandler : public TCPMessageHandler<HttpMessageFraming, HttpMess
 public:
     using HttpCallback = std::function<void(const std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming,HttpMessageFraming>>&, const ByteVector&)>;
 
-    void registerHandler(short messageType, HttpCallback callback) override {
+    void registerHandler(HttpCallback callback) override {
         // For HTTP, we don't use message types, so we'll ignore the messageType parameter
         m_handler = std::move(callback);
     }
@@ -43,8 +43,7 @@ template<typename SendFraming, typename ReceiveFraming>
 class SSLHttpMessageHandler : public MessageHandler<std::shared_ptr<SSLNetworkUtility::Session<SendFraming, ReceiveFraming>>> {
 public:
     using SSLHttpCallback = std::function<void(const std::shared_ptr<SSLNetworkUtility::Session<HttpMessageFraming,HttpMessageFraming>>&, const ByteVector&)>;
-    void registerHandler(short messageType, SSLHttpCallback callback) override {
-        // For HTTP, we don't use message types, so we'll ignore the messageType parameter
+    void registerHandler(SSLHttpCallback callback) {
         m_handler = std::move(callback);
     }
 

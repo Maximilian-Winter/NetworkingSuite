@@ -2,12 +2,12 @@
 
 #include <regex>
 
-#include "MessageFraming.h"
+#include "TCPMessageFraming.h"
 #include <sstream>
 #include <unordered_map>
 #include <string>
 
-class HttpMessageFraming : public MessageFraming {
+class HttpMessageFraming : public TCPMessageFraming {
 public:
     enum class MessageType {
         REQUEST,
@@ -15,7 +15,7 @@ public:
         UNKNOWN
     };
 
-    explicit HttpMessageFraming(const json& initializingData): MessageFraming(initializingData){
+    explicit HttpMessageFraming(const json& initializingData): TCPMessageFraming(initializingData){
         if (!connectionData_) {
             connectionData_ = std::make_shared<json>();
         }
@@ -24,7 +24,7 @@ public:
         (*connectionData_)["content_type"] = "plain/text";
     }
 
-    HttpMessageFraming(const json& initializingData, MessageType message_type): MessageFraming(initializingData)
+    HttpMessageFraming(const json& initializingData, MessageType message_type): TCPMessageFraming(initializingData)
     {
         if (!connectionData_) {
             connectionData_ = std::make_shared<json>();

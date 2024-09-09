@@ -10,7 +10,7 @@
 #include <atomic>
 #include "BufferPool.h"
 #include "Logger.h"
-#include "MessageFraming.h"
+
 #include "Utilities.h"
 
 class SSLNetworkUtility {

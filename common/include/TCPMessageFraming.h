@@ -13,13 +13,13 @@
 using ByteVector = std::vector<uint8_t>;
 using json = nlohmann::json;
 
-class MessageFraming {
+class TCPMessageFraming {
 public:
-    explicit MessageFraming(const json initializingData)
+    explicit TCPMessageFraming(const json& initializingData)
     {
         initializingData_ = std::make_shared<json>(initializingData);
     }
-    virtual ~MessageFraming() = default;
+    virtual ~TCPMessageFraming() = default;
 
     // Frame a message for sending
     virtual ByteVector frameMessage(const ByteVector& message) const = 0;
@@ -49,10 +49,10 @@ protected:
     std::shared_ptr<json> connectionData_;
 };
 
-class MagicNumberFraming : public MessageFraming {
+class TCPMagicNumberFraming : public TCPMessageFraming {
 public:
-    explicit MagicNumberFraming(const json initializingData)
-        : MessageFraming(initializingData)
+    explicit TCPMagicNumberFraming(const json initializingData)
+        : TCPMessageFraming(initializingData)
     {
         startMagicNumber_ = (*initializingData_)["magic_number_start"];
         endMagicNumber_ = (*initializingData_)["magic_number_end"];
