@@ -27,9 +27,11 @@ public:
                 m_handler(endpoint, data);
             } else {
                 LOG_ERROR("No HTTP handler registered");
+                endpoint->close();
             }
         } catch (const std::exception& e) {
             LOG_ERROR("Error handling HTTP message: %s", e.what());
+            endpoint->close();
         }
     }
 

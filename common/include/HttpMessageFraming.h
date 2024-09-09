@@ -1,5 +1,7 @@
 #pragma once
 
+#include <regex>
+
 #include "MessageFraming.h"
 #include <sstream>
 #include <unordered_map>
@@ -226,8 +228,83 @@ public:
         return (*connectionData_)["status_message"].get<std::string>();
     }
 
+    std::unordered_map<std::string, std::string> parseQueryString() const {
+        std::unordered_map<std::string, std::string> query_params;
+        std::string path = getRequestPath();
+        size_t query_start = path.find('?');
+
+        if (query_start != std::string::npos) {
+            std::string query = path.substr(query_start + 1);
+            std::istringstream query_stream(query);
+            std::string pair;
+
+            while (std::getline(query_stream, pair, '&')) {
+                size_t eq_pos = pair.find('=');
+                if (eq_pos != std::string::npos) {
+                    std::string key = pair.substr(0, eq_pos);
+                    std::string value = pair.substr(eq_pos + 1);
+                    query_params[urlDecode(key)] = urlDecode(value);
+                }
+            }
+        }
+
+        return query_params;
+    }
+
+    std::unordered_map<std::string, std::string> extractRouteParams(const std::string& route_pattern) const {
+        std::unordered_map<std::string, std::string> route_params;
+        std::string full_path = getRequestPath();
+        std::string path = full_path;
+
+        size_t query_pos = full_path.find_last_of('?');
+        if (query_pos != std::string::npos) {
+            path = full_path.substr(0, query_pos);
+        }
+        std::regex pattern(route_pattern);
+        std::smatch matches;
+
+        if (std::regex_match(path, matches, pattern)) {
+            for (size_t i = 1; i < matches.size(); ++i) {
+                std::string param_name = "param" + std::to_string(i);
+                route_params[param_name] = urlDecode(matches[i].str());
+            }
+        }
+
+        return route_params;
+    }
 private:
 
+    static std::string urlDecode(const std::string& encoded) {
+        std::string result;
+        for (size_t i = 0; i < encoded.length(); ++i) {
+            if (encoded[i] == '%' && i + 2 < encoded.length()) {
+                int value;
+                std::istringstream is(encoded.substr(i + 1, 2));
+                if (is >> std::hex >> value) {
+                    result += static_cast<char>(value);
+                    i += 2;
+                } else {
+                    result += encoded[i];
+                }
+            } else if (encoded[i] == '+') {
+                result += ' ';
+            } else {
+                result += encoded[i];
+            }
+        }
+        return result;
+    }
+    std::vector<std::string> split(const std::string& s, char delimiter) const {
+        std::vector<std::string> tokens;
+        std::string token;
+        std::istringstream tokenStream(s);
+        while (std::getline(tokenStream, token, delimiter)) {
+            if (!token.empty()) {
+                tokens.push_back(token);
+            }
+        }
+        return tokens;
+    }
     std::string getRequestLine() const {
         std::string method = connectionData_->value("request_method", "GET");
         std::string path = connectionData_->value("request_path", "/");

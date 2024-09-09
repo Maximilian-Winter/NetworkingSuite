@@ -15,7 +15,7 @@
 
 class HttpServer {
 public:
-    using RequestHandler = std::function<void(const std::string&, const std::unordered_map<std::string, std::string>&, const std::string&, std::string&, std::unordered_map<std::string, std::string>&)>;
+    using RequestHandler = std::function<void(const std::string&, const std::unordered_map<std::string, std::string>&, const std::string&, const std::unordered_map<std::string, std::string>&, const std::unordered_map<std::string, std::string>&, std::string&, std::unordered_map<std::string, std::string>&)>;
 
     explicit HttpServer(const std::string& config_file)
         : config_(std::make_shared<Config>()) {
@@ -43,10 +43,19 @@ public:
     }
 
     void addRoute(const std::string& path, RequestHandler handler) {
-        routes_.push_back({std::regex(path), handler});
+        std::string pattern = path + "(\\?.*)?$";
+        routes_.push_back({path, std::regex(pattern), handler});
     }
 
 private:
+    struct RouteInfo {
+        std::string pattern;
+        std::regex regex;
+        RequestHandler handler;
+    };
+
+
+
     void setupHTTPServer() {
         auto http_port = config_->get<unsigned short>("http_port", 80);
 
@@ -105,8 +114,16 @@ private:
     template<typename SessionType>
     void processRequest(const std::shared_ptr<SessionType>& session, const ByteVector& data) {
         std::string method = session->getReceiveFraming().getRequestMethod();
-        std::string path = session->getReceiveFraming().getRequestPath();
+        std::string full_path = session->getReceiveFraming().getRequestPath();
         std::string http_version = session->getReceiveFraming().getHttpVersion();
+
+        // Split the path and query string
+        std::string path = full_path;
+
+        size_t query_pos = full_path.find_last_of('?');
+        if (query_pos != std::string::npos) {
+            path = full_path.substr(0, query_pos);
+        }
 
         std::unordered_map<std::string, std::string> headers = session->getReceiveFraming().getHeaders();
 
@@ -120,11 +137,15 @@ private:
 
         bool route_handled = false;
 
+        // Parse query string
+        auto query_params = session->getReceiveFraming().parseQueryString();
+
         // Check for matching routes
         for (const auto& route : routes_) {
             std::smatch matches;
-            if (std::regex_match(path, matches, route.first)) {
-                route.second(method, headers, body, response, response_headers);
+            if (std::regex_match(path, matches, route.regex)) {
+                auto route_params = session->getReceiveFraming().extractRouteParams(route.pattern);
+                route.handler(method, headers, body, query_params, route_params, response, response_headers);
                 route_handled = true;
                 break;
             }
@@ -133,24 +154,21 @@ private:
         // If no route handled the request, try to serve a file
         if (!route_handled) {
             std::string content_type;
-            if(path == "/")
-            {
-                if(file_server_->serveFile(path + "index.html", response, content_type))
-                {
+            if(path == "/") {
+                if(file_server_->serveFile(path + "index.html", response, content_type)) {
                     response_headers["Content-Type"] = content_type;
                 } else {
                     response = "404 Not Found";
                     response_headers["Content-Type"] = "text/plain";
                 }
-            }
-            if (file_server_->serveFile(path, response, content_type)) {
+            } else if (file_server_->serveFile(path, response, content_type)) {
                 response_headers["Content-Type"] = content_type;
-
             } else {
                 response = "404 Not Found";
                 response_headers["Content-Type"] = "text/plain";
             }
         }
+
         response_headers["Content-Length"] = std::to_string(static_cast<int>(response.size()));
         session->getSendFraming().setMessageType(HttpMessageFraming::MessageType::RESPONSE);
         session->getSendFraming().setHeaders(response_headers);
@@ -161,6 +179,6 @@ private:
     std::shared_ptr<Config> config_;
     std::shared_ptr<AsioThreadPool> thread_pool_;
     std::unique_ptr<Server> server_;
-    std::vector<std::pair<std::regex, RequestHandler>> routes_;
+    std::vector<RouteInfo> routes_;
     std::unique_ptr<FileServer> file_server_;
 };
