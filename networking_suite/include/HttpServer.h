@@ -12,16 +12,15 @@
 #include <functional>
 #include <regex>
 
+struct RouteContext {
+    std::string pattern;
+    std::regex regex;
+};
+
 class HttpServer {
 public:
-    using RequestHandler = std::function<void(const std::string&,
-                                          const std::unordered_map<std::string, std::string>&,
-                                          const std::string&,
-                                          const std::unordered_map<std::string, std::string>&,
-                                          const std::unordered_map<std::string, std::string>&,
-                                          std::string&,
-                                          std::unordered_map<std::string, std::string>&,
-                                          HttpMessageFraming&)>;
+
+    using RequestHandler = std::function<void(RouteContext route_context, const HttpRequest& request, HttpResponse& response)>;
     explicit HttpServer(const std::string& config_file)
         : config_(std::make_shared<Config>()), message_framing_(), ssl_message_framing_()
     {
@@ -93,21 +92,21 @@ private:
 
 
     void handleHTTPRequest(const std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
-        processRequest(session, data, tcp_handler_);
+        processRequest(session, data);
     }
 
     void handleHTTPSRequest(const std::shared_ptr<SSLNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
-        processRequest(session, data, ssl_handler_);
+        processRequest(session, data);
     }
 
-    template<typename SessionType, typename SessionContextType>
-    void processRequest(const std::shared_ptr<SessionType>& session, const ByteVector& data, SessionContextType& context) {
-        auto& receive_framing = context.get_message_framing_receive();
-        auto& send_framing = context.get_message_framing_send();
+    template<typename SessionType>
+    void processRequest(const std::shared_ptr<SessionType>& session, const ByteVector& data) {
+        auto request = HttpParser::parseRequest(data) ;
+        HttpResponse response;
 
-        std::string method = receive_framing.getRequestMethod();
-        std::string full_path = receive_framing.getRequestPath();
-        std::string http_version = receive_framing.getHttpVersion();
+        std::string method = request.getMethod();
+        std::string full_path = request.getPath();
+        std::string http_version = request.getHttpVersion();
 
         // Split the path and query string
         std::string path = full_path;
@@ -117,27 +116,20 @@ private:
             path = full_path.substr(0, query_pos);
         }
 
-        std::unordered_map<std::string, std::string> headers = receive_framing.getHeaders();
+        HttpHeader headers = request.header();
 
         std::string body;
         if (static_cast<int>(data.size()) > 0) {
             body = std::string(data.begin(), data.end());
         }
 
-        std::string response;
-        std::unordered_map<std::string, std::string> response_headers;
-
         bool route_handled = false;
-
-        // Parse query string
-        auto query_params = receive_framing.parseQueryString();
 
         // Check for matching routes
         for (const auto& route : routes_) {
             std::smatch matches;
             if (std::regex_match(path, matches, route.regex)) {
-                auto route_params = receive_framing.extractRouteParams(route.pattern);
-                route.handler(method, headers, body, query_params, route_params, response, response_headers, send_framing);
+                route.handler(RouteContext{route.pattern, route.regex}, request, response);
                 route_handled = true;
                 break;
             }
@@ -146,25 +138,27 @@ private:
         // If no route handled the request, try to serve a file
         if (!route_handled) {
             std::string content_type;
+            std::string content;
             if(path == "/") {
-                if(file_server_->serveFile(path + "index.html", response, content_type)) {
-                    response_headers["Content-Type"] = content_type;
+                if(file_server_->serveFile(path + "index.html", content, content_type)) {
+                    response.body().setContent(content);
+                    response.header().addField("Content-Type", content_type);
+                    response.header().addField("Content-Length", std::to_string(content.length()));
                 } else {
-                    send_framing.setStatusCode(404);
-                    send_framing.setStatusMessage("NOT FOUND");
-                    send_framing.setMessageType(HttpMessageFraming::MessageType::RESPONSE);
+                    response.setStatusCode(404);
+                    response.setStatusMessage("NOT FOUND");
                 }
-            } else if (file_server_->serveFile(path, response, content_type)) {
-                response_headers["Content-Type"] = content_type;
+            } else if (file_server_->serveFile(path, content, content_type)) {
+                response.body().setContent(content);
+                response.header().addField("Content-Type", content_type);
+                response.header().addField("Content-Length", std::to_string(content.length()));
             } else {
-                send_framing.setStatusCode(404);
-                send_framing.setStatusMessage("NOT FOUND");
-                send_framing.setMessageType(HttpMessageFraming::MessageType::RESPONSE);
+                response.setStatusCode(404);
+                response.setStatusMessage("NOT FOUND");
             }
         }
-
-        response_headers["Content-Length"] = std::to_string(static_cast<int>(response.size()));
-        session->write(ByteVector(response.begin(), response.end()));
+        std::string response_string = response.toString();
+        session->write(ByteVector(response_string.begin(), response_string.end()));
         session->close();
     }
 

@@ -8,7 +8,7 @@ add_executable(http_server src/server.cpp)
 
 
 target_include_directories(http_server PRIVATE
-        ${CMAKE_SOURCE_DIR}/common/include
+        ${CMAKE_SOURCE_DIR}/networking_suite/include
 )
 
 target_link_libraries(http_server PRIVATE

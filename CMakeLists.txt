@@ -56,7 +56,6 @@ function(add_common_settings target)
     )
 endfunction()
 
-add_subdirectory(common)
 add_subdirectory(echo_server_example)
 add_subdirectory(http_server_example)
 
