@@ -4,7 +4,6 @@
 // EchoServer.cpp
 #include "Server.h"
 #include "UDPMessageFraming.h"
-#include "MessageHandler.h"
 #include "Config.h"
 #include <iostream>
 
@@ -20,7 +19,7 @@ public:
             handleEcho(session, data);
         });
 
-        udp_handler->registerHandler([this](const std::shared_ptr<UDPNetworkUtility::Connection<UDPMagicNumberFraming, UDPMagicNumberFraming>>& connection, const ByteVector& data) {
+        udp_handler->registerHandler([this](const std::shared_ptr<UDPNetworkUtility::Session<UDPMagicNumberFraming, UDPMagicNumberFraming>>& connection, const ByteVector& data) {
             handleEcho(connection, data);
         });
         json framingInitialData ={};
@@ -38,11 +37,11 @@ public:
         );
 
         server_.addUdpPort<UDPMagicNumberFraming, UDPMagicNumberFraming>(8081,
-            [](std::shared_ptr<UDPNetworkUtility::Connection<UDPMagicNumberFraming, UDPMagicNumberFraming>> connection) {
+            [](std::shared_ptr<UDPNetworkUtility::Session<UDPMagicNumberFraming, UDPMagicNumberFraming>> connection) {
                 std::cout << "New UDP connection: " << connection->getConnectionUuid() << std::endl;
             },
             udp_handler,
-            [](std::shared_ptr<UDPNetworkUtility::Connection<UDPMagicNumberFraming, UDPMagicNumberFraming>> connection) {
+            [](std::shared_ptr<UDPNetworkUtility::Session<UDPMagicNumberFraming, UDPMagicNumberFraming>> connection) {
                 std::cout << "UDP connection closed: " << connection->getConnectionUuid() << std::endl;
             }, framingInitialData, framingInitialData
         );
@@ -65,7 +64,7 @@ private:
         std::cout << "Received Message from " << binary_message.getPayload().Sender << ": " <<binary_message.getPayload().Message << std::endl;
         endpoint->write(data);  // Echo back the received data
     }
-    void handleEcho(const std::shared_ptr<UDPNetworkUtility::Connection<UDPMagicNumberFraming, UDPMagicNumberFraming>>& endpoint, const ByteVector& data) {
+    void handleEcho(const std::shared_ptr<UDPNetworkUtility::Session<UDPMagicNumberFraming, UDPMagicNumberFraming>>& endpoint, const ByteVector& data) {
         NetworkMessages::BinaryMessage<NetworkMessages::ChatMessage> binary_message(0, NetworkMessages::ChatMessage());
         size_t offset = 0;
         binary_message.deserialize(data, offset);

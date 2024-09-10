@@ -6,7 +6,6 @@
 
 #include "Server.h"
 #include "HttpMessageFraming.h"
-#include "HttpMessageHandler.h"
 #include "Config.h"
 #include "FileServer.h"
 #include <unordered_map>
@@ -15,11 +14,17 @@
 
 class HttpServer {
 public:
-    using RequestHandler = std::function<void(const std::string&, const std::unordered_map<std::string, std::string>&, const std::string&, const std::unordered_map<std::string, std::string>&, const std::unordered_map<std::string, std::string>&, std::string&, std::unordered_map<std::string, std::string>&)>;
-
+    using RequestHandler = std::function<void(const std::string&,
+                                          const std::unordered_map<std::string, std::string>&,
+                                          const std::string&,
+                                          const std::unordered_map<std::string, std::string>&,
+                                          const std::unordered_map<std::string, std::string>&,
+                                          std::string&,
+                                          std::unordered_map<std::string, std::string>&,
+                                          HttpMessageFraming&)>;
     explicit HttpServer(const std::string& config_file)
-        : config_(std::make_shared<Config>()) {
-
+        : config_(std::make_shared<Config>()), message_framing_(), ssl_message_framing_()
+    {
         config_->load(config_file);
 
         unsigned int thread_count = config_->get<unsigned int>("thread_count", 4);
@@ -42,7 +47,7 @@ public:
         server_->stop();
     }
 
-    void addRoute(const std::string& path, RequestHandler handler) {
+    void addRoute(const std::string& path, const RequestHandler &handler) {
         std::string pattern = path + "(\\?.*)?$";
         routes_.push_back({path, std::regex(pattern), handler});
     }
@@ -58,22 +63,13 @@ private:
 
     void setupHTTPServer() {
         auto http_port = config_->get<unsigned short>("http_port", 80);
-
-        auto tcp_handler = std::make_shared<HttpMessageHandler>();
-
-        tcp_handler->registerHandler([this](const std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
+        tcp_handler_.set_message_framing_sender(message_framing_);
+        tcp_handler_.set_message_framing_receiver(message_framing_2);
+        tcp_handler_.set_message_handler([this](const std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
             handleHTTPRequest(session, data);
         });
 
-        server_->addTcpPort<HttpMessageFraming,HttpMessageFraming>(http_port,
-            [](std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming,HttpMessageFraming>> session) {
-                std::cout << "New HTTP connection: " << session->getSessionUuid() << std::endl;
-            },
-            tcp_handler,
-            [](std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming,HttpMessageFraming>> session) {
-                std::cout << "HTTP connection closed: " << session->getSessionUuid() << std::endl;
-            }, {}, {}
-        );
+        server_->addTcpPort(http_port, tcp_handler_);
     }
 
     void setupHTTPSServer() {
@@ -86,36 +82,32 @@ private:
             std::cout << "SSL configuration is incomplete. HTTPS server will not be started." << std::endl;
             return;
         }
-
-        auto ssl_handler = std::make_shared<SSLHttpMessageHandler<HttpMessageFraming, HttpMessageFraming>>();
-        ssl_handler->registerHandler([this](const std::shared_ptr<SSLNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
+        ssl_handler_.set_message_framing_sender(ssl_message_framing_);
+        ssl_handler_.set_message_framing_receiver(ssl_message_framing_2);
+        ssl_handler_.set_message_handler([this](const std::shared_ptr<SSLNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
             handleHTTPSRequest(session, data);
         });
 
-        server_->addSslTcpPort<HttpMessageFraming,HttpMessageFraming>(https_port, ssl_cert, ssl_key, ssl_dh_file,
-            [](std::shared_ptr<SSLNetworkUtility::Session<HttpMessageFraming,HttpMessageFraming>> session) {
-                std::cout << "New HTTPS connection: " << session->getSessionUuid() << std::endl;
-            },
-            ssl_handler,
-            [](std::shared_ptr<SSLNetworkUtility::Session<HttpMessageFraming,HttpMessageFraming>> session) {
-                std::cout << "HTTPS connection closed: " << session->getSessionUuid() << std::endl;
-            }, {}, {}
-        );
+        server_->addSslTcpPort(https_port, ssl_cert, ssl_key, ssl_dh_file, ssl_handler_);
     }
 
-     void handleHTTPRequest(const std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming,HttpMessageFraming>>& session, const ByteVector& data) {
-        processRequest(session, data);
+
+    void handleHTTPRequest(const std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
+        processRequest(session, data, tcp_handler_);
     }
 
-    void handleHTTPSRequest(const std::shared_ptr<SSLNetworkUtility::Session<HttpMessageFraming,HttpMessageFraming>>& session, const ByteVector& data) {
-        processRequest(session, data);
+    void handleHTTPSRequest(const std::shared_ptr<SSLNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
+        processRequest(session, data, ssl_handler_);
     }
 
-    template<typename SessionType>
-    void processRequest(const std::shared_ptr<SessionType>& session, const ByteVector& data) {
-        std::string method = session->getReceiveFraming().getRequestMethod();
-        std::string full_path = session->getReceiveFraming().getRequestPath();
-        std::string http_version = session->getReceiveFraming().getHttpVersion();
+    template<typename SessionType, typename SessionContextType>
+    void processRequest(const std::shared_ptr<SessionType>& session, const ByteVector& data, SessionContextType& context) {
+        auto& receive_framing = context.get_message_framing_receive();
+        auto& send_framing = context.get_message_framing_send();
+
+        std::string method = receive_framing.getRequestMethod();
+        std::string full_path = receive_framing.getRequestPath();
+        std::string http_version = receive_framing.getHttpVersion();
 
         // Split the path and query string
         std::string path = full_path;
@@ -125,7 +117,7 @@ private:
             path = full_path.substr(0, query_pos);
         }
 
-        std::unordered_map<std::string, std::string> headers = session->getReceiveFraming().getHeaders();
+        std::unordered_map<std::string, std::string> headers = receive_framing.getHeaders();
 
         std::string body;
         if (static_cast<int>(data.size()) > 0) {
@@ -138,14 +130,14 @@ private:
         bool route_handled = false;
 
         // Parse query string
-        auto query_params = session->getReceiveFraming().parseQueryString();
+        auto query_params = receive_framing.parseQueryString();
 
         // Check for matching routes
         for (const auto& route : routes_) {
             std::smatch matches;
             if (std::regex_match(path, matches, route.regex)) {
-                auto route_params = session->getReceiveFraming().extractRouteParams(route.pattern);
-                route.handler(method, headers, body, query_params, route_params, response, response_headers);
+                auto route_params = receive_framing.extractRouteParams(route.pattern);
+                route.handler(method, headers, body, query_params, route_params, response, response_headers, send_framing);
                 route_handled = true;
                 break;
             }
@@ -158,24 +150,30 @@ private:
                 if(file_server_->serveFile(path + "index.html", response, content_type)) {
                     response_headers["Content-Type"] = content_type;
                 } else {
-                    response = "404 Not Found";
-                    response_headers["Content-Type"] = "text/plain";
+                    send_framing.setStatusCode(404);
+                    send_framing.setStatusMessage("NOT FOUND");
+                    send_framing.setMessageType(HttpMessageFraming::MessageType::RESPONSE);
                 }
             } else if (file_server_->serveFile(path, response, content_type)) {
                 response_headers["Content-Type"] = content_type;
             } else {
-                response = "404 Not Found";
-                response_headers["Content-Type"] = "text/plain";
+                send_framing.setStatusCode(404);
+                send_framing.setStatusMessage("NOT FOUND");
+                send_framing.setMessageType(HttpMessageFraming::MessageType::RESPONSE);
             }
         }
 
         response_headers["Content-Length"] = std::to_string(static_cast<int>(response.size()));
-        session->getSendFraming().setMessageType(HttpMessageFraming::MessageType::RESPONSE);
-        session->getSendFraming().setHeaders(response_headers);
-
         session->write(ByteVector(response.begin(), response.end()));
+        session->close();
     }
 
+    SessionContext<TCPNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>, HttpMessageFraming, HttpMessageFraming> tcp_handler_;
+    HttpMessageFraming message_framing_;
+    HttpMessageFraming message_framing_2;
+    SessionContext<SSLNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>, HttpMessageFraming, HttpMessageFraming> ssl_handler_;
+    HttpMessageFraming ssl_message_framing_;
+    HttpMessageFraming ssl_message_framing_2;
     std::shared_ptr<Config> config_;
     std::shared_ptr<AsioThreadPool> thread_pool_;
     std::unique_ptr<Server> server_;

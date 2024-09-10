@@ -5,6 +5,9 @@
 #include <functional>
 #include <memory>
 #include <atomic>
+#include <utility>
+#include <SessionContext.h>
+
 #include "BufferPool.h"
 #include "Logger.h"
 #include "TCPMessageFraming.h"
@@ -14,8 +17,8 @@
 class TCPNetworkUtility {
 public:
 
-    template<typename SendFraming, typename ReceiveFraming>
-    class Session : public std::enable_shared_from_this<Session<SendFraming, ReceiveFraming>> {
+    template< typename SenderFramingType, typename ReceiverFramingType>
+    class Session : public std::enable_shared_from_this<Session<SenderFramingType, ReceiverFramingType>> {
     protected:
         asio::ip::tcp::socket socket_;
         std::string sessionUuid_;
@@ -23,31 +26,28 @@ public:
         std::shared_ptr<BufferPool> buffer_pool_;
         LockFreeQueue<ByteVector*, 1024> write_queue_;
         std::atomic<bool> is_closed_{false};
-        std::function<void(std::shared_ptr<Session>)> connection_closed_callback_;
-        std::function<void(const ByteVector&)> message_handler_;
-        SendFraming send_framing_;
-        ReceiveFraming receive_framing_;
+        SessionContext<Session, SenderFramingType, ReceiverFramingType> connection_context_;
         ByteVector read_buffer_;
 
     public:
         virtual ~Session() = default;
 
         auto get_shared_this() {
-            return this->std::enable_shared_from_this<Session>::template shared_from_this();
+            return this->shared_from_this();
         }
-        explicit Session(asio::io_context& io_context, const json senderFramingInitialData, const json receiveFramingInitialData)
+        explicit Session(asio::io_context& io_context)
             : socket_(io_context),
               strand_(asio::make_strand(io_context)),
-              buffer_pool_(std::make_shared<BufferPool>(8192)),
-              sessionUuid_(Utilities::generateUuid()), send_framing_(senderFramingInitialData), receive_framing_(receiveFramingInitialData)
+              buffer_pool_(std::make_shared<BufferPool>(32728)),
+              sessionUuid_(Utilities::generateUuid())
         {
-            read_buffer_.reserve(buffer_pool_->getBufferSize() + receive_framing_.getMaxFramingOverhead());
+            read_buffer_.reserve(buffer_pool_->getBufferSize());
         }
 
-        void start(const std::function<void(const ByteVector&)>& messageHandler,
-                   const std::function<void(std::shared_ptr<Session>)>& closedCallback) {
-            message_handler_ = messageHandler;
-            connection_closed_callback_ = closedCallback;
+        void start(const SessionContext<Session, SenderFramingType, ReceiverFramingType>& connection_context) {
+            connection_context_ = connection_context;
+            connection_context_.set_port(get_shared_this());
+            connection_context_.on_connect();
             do_read();
         }
 
@@ -63,7 +63,7 @@ public:
             }
 
             ByteVector* buffer = buffer_pool_->acquire();
-            *buffer = send_framing_.frameMessage(message);
+            *buffer = connection_context_.preprocess_write(message);
 
             asio::post(strand_, [this, buffer]() {
                 write_queue_.push(buffer);
@@ -74,17 +74,10 @@ public:
         }
 
         void close() {
-            if (is_closed_.exchange(true, std::memory_order_acq_rel)) {
-                return;
-            }
-
             asio::post(strand_, [this, self = get_shared_this()]() {
                 do_close();
             });
         }
-
-        SendFraming& getSendFraming() { return send_framing_; }
-        ReceiveFraming& getReceiveFraming() { return receive_framing_; }
 
     protected:
         virtual void do_read() {
@@ -109,12 +102,12 @@ public:
             read_buffer_.insert(read_buffer_.end(), new_data.begin(), new_data.end());
 
             while (true) {
-                if (receive_framing_.isCompleteMessage(read_buffer_)) {
-                    ByteVector message = receive_framing_.extractMessage(read_buffer_);
-                    ByteVector message_size = receive_framing_.frameMessage(message);
-                    read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + static_cast<int>(message_size.size()));
+                if (connection_context_.checkIfIsCompleteMessage(read_buffer_)) {
+                    ByteVector message = connection_context_.postprocess_read(read_buffer_);
+                    size_t message_size = read_buffer_.size();
+                    read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + static_cast<int>(message_size));
 
-                    message_handler_(message);
+                    connection_context_.on_message(message);
                 } else {
                     break;
                 }
@@ -155,6 +148,9 @@ public:
 
         void do_close()
         {
+            if (is_closed_.exchange(true, std::memory_order_acq_rel)) {
+                return;
+            }
             // Clear the write queue
             while (auto opt_buffer = write_queue_.pop()) {
                 buffer_pool_->release(*opt_buffer);
@@ -162,10 +158,7 @@ public:
 
             if (!socket_.is_open())
             {
-                if (connection_closed_callback_)
-                {
-                    connection_closed_callback_(get_shared_this());
-                }
+                connection_context_.on_close();
                 return; // Socket is already closed
             }
 
@@ -192,43 +185,32 @@ public:
                 LOG_ERROR("Error closing socket: %s", ec.message().c_str());
             }
 
-            if (connection_closed_callback_)
-            {
-                connection_closed_callback_(get_shared_this());
-            }
+            connection_context_.on_close();
         }
     };
-    template<typename SendFraming, typename ReceiveFraming>
-    static std::shared_ptr<Session<SendFraming, ReceiveFraming>> createSession(asio::io_context& io_context, asio::ip::tcp::socket& socket, const json senderFramingInitialData, const json receiveFramingInitialData) {
-        auto session = std::make_shared<Session<SendFraming, ReceiveFraming>>(io_context, senderFramingInitialData, receiveFramingInitialData);
+    template< typename SenderFramingType, typename ReceiverFramingType>
+    static std::shared_ptr<Session<SenderFramingType, ReceiverFramingType>> createSession(asio::io_context& io_context, asio::ip::tcp::socket& socket) {
+        auto session = std::make_shared<Session<SenderFramingType, ReceiverFramingType>>(io_context);
         session->socket() = std::move(socket);
         return session;
     }
-    template<typename SendFraming, typename ReceiveFraming>
-    static std::shared_ptr<Session<SendFraming, ReceiveFraming>> connect(
+    template< typename SenderFramingType, typename ReceiverFramingType>
+    static std::shared_ptr<Session<SenderFramingType, ReceiverFramingType>> connect(
         asio::io_context& io_context,
         const std::string& host,
         const std::string& port,
-        const std::function<void(std::error_code, std::shared_ptr<Session<SendFraming, ReceiveFraming>>)>& callback,
-        const std::function<void(std::shared_ptr<Session<SendFraming, ReceiveFraming>> session, ByteVector message)>& messageCallback,
-        const std::function<void(std::shared_ptr<Session<SendFraming, ReceiveFraming>>)>& closedCallback, const json& senderFramingInitialData, const json& receiveFramingInitialData) {
+        const SessionContext<Session<SenderFramingType, ReceiverFramingType>, SenderFramingType, ReceiverFramingType>& connection_context) {
 
-        auto session = std::make_shared<Session<SendFraming, ReceiveFraming>>(io_context, senderFramingInitialData, receiveFramingInitialData);
+        auto session = std::make_shared<Session<SenderFramingType, ReceiverFramingType>>(io_context);
 
         asio::ip::tcp::resolver resolver(io_context);
         auto endpoints = resolver.resolve(host, port);
 
         asio::async_connect(session->socket(), endpoints,
-            [session, callback, closedCallback, messageCallback](const std::error_code& ec, const asio::ip::tcp::endpoint&) {
+            [session, connection_context](const std::error_code& ec, const asio::ip::tcp::endpoint&) {
                 if (!ec) {
-                    session->start(
-                        [session, messageCallback, ec](const ByteVector& data) {
-                            messageCallback(session, data);
-                        },
-                        closedCallback
-                    );
+                    session->start(connection_context);
                 }
-                callback(ec, session);
             });
 
         return session;

@@ -4,18 +4,18 @@
 
 #pragma once
 
+#include <utility>
 #include <vector>
 #include <memory>
 #include "AsioThreadPool.h"
-#include "MessageHandler.h"
 #include "Config.h"
 #include "Port.h"
 
 
 class Server {
 public:
-    Server(std::shared_ptr<AsioThreadPool> thread_pool, const Config& config)
-        : thread_pool_(std::move(thread_pool)), config_(config)
+    Server(std::shared_ptr<AsioThreadPool> thread_pool, Config  config)
+        : thread_pool_(std::move(thread_pool)), config_(std::move(config))
     {
         //auto port = config_.get<short>("port", 8080);
         std::string defaultLevel = "INFO";
@@ -27,30 +27,21 @@ public:
         logger.addDestination(std::make_shared<AsyncLogger::ConsoleDestination>());
         logger.addDestination(std::make_shared<AsyncLogger::FileDestination>(log_file, log_file_size_in_mb * (1024 * 1024)));
     }
-    template<typename SendFraming, typename ReceiveFraming>
-    void addTcpPort(unsigned short port_number, const std::function<void(std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>>)> &connectedCallback, const std::shared_ptr<TCPMessageHandler<SendFraming, ReceiveFraming>> &handler, const std::function<void(std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>>)>& close_callback, const json senderFramingInitialData, const json receiveFramingInitialData) {
-        auto tcp_port = std::make_shared<TcpPort<SendFraming, ReceiveFraming>>(thread_pool_->get_io_context(), port_number, senderFramingInitialData, receiveFramingInitialData);
-        tcp_port->setConnectedCallback(connectedCallback);
-        tcp_port->setMessageHandler(handler);
-        tcp_port->setCloseCallback(close_callback);
+    template< typename SenderFramingType, typename ReceiverFramingType>
+    void addTcpPort(unsigned short port_number, SessionContext<TCPNetworkUtility::Session<SenderFramingType, ReceiverFramingType>, SenderFramingType, ReceiverFramingType> &connection_context) {
+        auto tcp_port = std::make_shared<TcpPort<SenderFramingType, ReceiverFramingType>>(thread_pool_->get_io_context(), port_number, connection_context);
         ports_.push_back(tcp_port);
     }
 
-    template<typename SendFraming, typename ReceiveFraming>
-    void addSslTcpPort(unsigned short port_number, const std::string& ssl_cert_file, const std::string& ssl_key_file, const std::string& ssl_dh_file, const std::function<void(std::shared_ptr<SSLNetworkUtility::Session<SendFraming, ReceiveFraming>>)> &connectedCallback, const std::shared_ptr<SSLHttpMessageHandler<SendFraming, ReceiveFraming>> &handler, const std::function<void(std::shared_ptr<SSLNetworkUtility::Session<SendFraming, ReceiveFraming>>)>& close_callback, const json senderFramingInitialData, const json receiveFramingInitialData) {
-        auto tcp_port = std::make_shared<SslPort<SendFraming, ReceiveFraming>>(thread_pool_->get_io_context(), port_number, ssl_cert_file, ssl_key_file, ssl_dh_file, senderFramingInitialData, receiveFramingInitialData);
-        tcp_port->setConnectedCallback(connectedCallback);
-        tcp_port->setMessageHandler(handler);
-        tcp_port->setCloseCallback(close_callback);
+    template< typename SenderFramingType, typename ReceiverFramingType>
+    void addSslTcpPort(unsigned short port_number, const std::string& ssl_cert_file, const std::string& ssl_key_file, const std::string& ssl_dh_file, SessionContext<SSLNetworkUtility::Session<SenderFramingType, ReceiverFramingType>, SenderFramingType, ReceiverFramingType>& connection_context) {
+        auto tcp_port = std::make_shared<SslPort<SenderFramingType, ReceiverFramingType>>(thread_pool_->get_io_context(), port_number, ssl_cert_file, ssl_key_file, ssl_dh_file, connection_context);
         ports_.push_back(tcp_port);
     }
 
-    template<typename SendFraming, typename ReceiveFraming>
-    void addUdpPort(unsigned short port_number, const std::function<void(std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>>)> &connectedCallback, const std::shared_ptr<UDPMessageHandler<SendFraming, ReceiveFraming>>& handler, const std::function<void(std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>>)>& close_callback, const json senderFramingInitialData, const json receiveFramingInitialData) {
-        auto udp_port = std::make_shared<UdpPort<SendFraming, ReceiveFraming>>(thread_pool_->get_io_context(), port_number, senderFramingInitialData, receiveFramingInitialData);
-        udp_port->setConnectedCallback(connectedCallback);
-        udp_port->setMessageHandler(handler);
-        udp_port->setCloseCallback(close_callback);
+    template< typename SenderFramingType, typename ReceiverFramingType>
+    void addUdpPort(unsigned short port_number, SessionContext<UDPNetworkUtility::Session<SenderFramingType, ReceiverFramingType>, SenderFramingType, ReceiverFramingType>& connection_context) {
+        auto udp_port = std::make_shared<UdpPort<SenderFramingType, ReceiverFramingType>>(thread_pool_->get_io_context(), port_number,connection_context);
         ports_.push_back(udp_port);
     }
 

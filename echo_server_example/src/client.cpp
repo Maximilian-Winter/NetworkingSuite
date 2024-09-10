@@ -25,7 +25,7 @@ public:
             handleEchoResponse(binary_message.getPayload());
         });
 
-        udp_handler_->registerHandler([this](const std::shared_ptr<UDPNetworkUtility::Connection<UDPMagicNumberFraming, UDPMagicNumberFraming>>& connection, const ByteVector& data) {
+        udp_handler_->registerHandler([this](const std::shared_ptr<UDPNetworkUtility::Session<UDPMagicNumberFraming, UDPMagicNumberFraming>>& connection, const ByteVector& data) {
             NetworkMessages::BinaryMessage<NetworkMessages::ChatMessage> binary_message(0, NetworkMessages::ChatMessage());
             size_t offset = 0;
             binary_message.deserialize(data, offset);
@@ -74,7 +74,7 @@ private:
         framingInitialData["magic_number_start"] = 42;
         framingInitialData["magic_number_end"] = 24;
         client_.connectUDP<UDPMagicNumberFraming, UDPMagicNumberFraming>("localhost", "8081",
-            [this](std::error_code ec, std::shared_ptr<UDPNetworkUtility::Connection<UDPMagicNumberFraming, UDPMagicNumberFraming>> connection) {
+            [this](std::error_code ec, std::shared_ptr<UDPNetworkUtility::Session<UDPMagicNumberFraming, UDPMagicNumberFraming>> connection) {
                 if (!ec) {
                     std::cout << "Connected to UDP server" << std::endl;
                     udp_connection_ = connection;
@@ -83,7 +83,7 @@ private:
                 }
             },
             udp_handler_,
-            [](std::shared_ptr<UDPNetworkUtility::Connection<UDPMagicNumberFraming, UDPMagicNumberFraming>> connection) {
+            [](std::shared_ptr<UDPNetworkUtility::Session<UDPMagicNumberFraming, UDPMagicNumberFraming>> connection) {
                 std::cout << "UDP connection closed" << std::endl;
             }, framingInitialData, framingInitialData
         );
@@ -126,7 +126,7 @@ private:
     std::shared_ptr<TCPMessageHandler<TCPMagicNumberFraming, TCPMagicNumberFraming>> tcp_handler_;
     std::shared_ptr<UDPMessageHandler<UDPMagicNumberFraming, UDPMagicNumberFraming>> udp_handler_;
     std::shared_ptr<TCPNetworkUtility::Session<TCPMagicNumberFraming, TCPMagicNumberFraming>> tcp_session_;
-    std::shared_ptr<UDPNetworkUtility::Connection<UDPMagicNumberFraming, UDPMagicNumberFraming>> udp_connection_;
+    std::shared_ptr<UDPNetworkUtility::Session<UDPMagicNumberFraming, UDPMagicNumberFraming>> udp_connection_;
     std::atomic<bool> running_;
 };
 

@@ -11,47 +11,47 @@
 #include "BufferPool.h"
 #include "Logger.h"
 
+#include "SessionContext.h"
 #include "Utilities.h"
 
 class SSLNetworkUtility {
 public:
-    template<typename SendFraming, typename ReceiveFraming>
-    class Session : public std::enable_shared_from_this<Session<SendFraming, ReceiveFraming>> {
+    template< typename SenderFramingType, typename ReceiverFramingType>
+    class Session : public std::enable_shared_from_this<Session<SenderFramingType, ReceiverFramingType>> {
     protected:
         asio::ip::tcp::socket socket_;
-        std::unique_ptr<asio::ssl::stream<asio::ip::tcp::socket>> ssl_socket_;
+        std::shared_ptr<asio::ssl::stream<asio::ip::tcp::socket>> ssl_socket_;
         std::string sessionUuid_;
         asio::strand<asio::io_context::executor_type> strand_;
         std::shared_ptr<BufferPool> buffer_pool_;
         LockFreeQueue<ByteVector*, 1024> write_queue_;
         std::atomic<bool> is_closed_{false};
-        std::function<void(std::shared_ptr<Session>)> connection_closed_callback_;
-        std::function<void(const ByteVector&)> message_handler_;
-        SendFraming send_framing_;
-        ReceiveFraming receive_framing_;
         ByteVector read_buffer_;
-
+        SessionContext<Session,SenderFramingType, ReceiverFramingType > connection_context_;
     public:
         virtual ~Session() = default;
 
         auto get_shared_this() {
-            return this->std::enable_shared_from_this<Session>::shared_from_this();
+            return this->shared_from_this();
         }
 
-        explicit Session(asio::io_context& io_context, asio::ip::tcp::socket socket, asio::ssl::context& ssl_context, const json senderFramingInitialData, const json receiveFramingInitialData)
+        std::shared_ptr<asio::ssl::stream<asio::ip::tcp::socket>> getSslSocket()
+        {
+            return ssl_socket_;
+        }
+        explicit Session(asio::io_context& io_context, asio::ip::tcp::socket socket, asio::ssl::context& ssl_context)
         : socket_(std::move(socket)),
               ssl_socket_(new asio::ssl::stream<asio::ip::tcp::socket>(std::move(socket_), ssl_context)),
+              sessionUuid_(Utilities::generateUuid()),
               strand_(asio::make_strand(io_context)),
-              buffer_pool_(std::make_shared<BufferPool>(8192)),
-              sessionUuid_(Utilities::generateUuid()), send_framing_(senderFramingInitialData), receive_framing_(receiveFramingInitialData)
+              buffer_pool_(std::make_shared<BufferPool>(32728))
         {
-            read_buffer_.reserve(buffer_pool_->getBufferSize() + receive_framing_.getMaxFramingOverhead());
+            read_buffer_.reserve(buffer_pool_->getBufferSize());
         }
 
-        void start(const std::function<void(const ByteVector&)>& messageHandler,
-                   const std::function<void(std::shared_ptr<Session>)>& closedCallback) {
-            message_handler_ = messageHandler;
-            connection_closed_callback_ = closedCallback;
+        void start(const SessionContext<Session, SenderFramingType, ReceiverFramingType> &connection_context) {
+            connection_context_ = connection_context;
+            connection_context_.set_port(get_shared_this());
             do_handshake();
         }
 
@@ -61,13 +61,17 @@ public:
 
         std::string getSessionUuid() { return sessionUuid_; }
 
+        SessionContext<Session,SenderFramingType, ReceiverFramingType >& getConnectionContext()
+        {
+            return connection_context_;
+        }
         void write(const ByteVector& message) {
             if (is_closed()) {
                 return;
             }
 
             ByteVector* buffer = buffer_pool_->acquire();
-            *buffer = send_framing_.frameMessage(message);
+            *buffer = connection_context_.preprocess_write(message);
 
             asio::post(strand_, [this, buffer]() {
                 write_queue_.push(buffer);
@@ -86,9 +90,6 @@ public:
                 do_close();
             });
         }
-
-        SendFraming& getSendFraming() { return send_framing_; }
-        ReceiveFraming& getReceiveFraming() { return receive_framing_; }
 
     protected:
         void do_handshake() {
@@ -125,12 +126,12 @@ public:
             read_buffer_.insert(read_buffer_.end(), new_data.begin(), new_data.end());
 
             while (true) {
-                if (receive_framing_.isCompleteMessage(read_buffer_)) {
-                    ByteVector message = receive_framing_.extractMessage(read_buffer_);
-                    ByteVector message_size = receive_framing_.frameMessage(message);
-                    read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + static_cast<int>(message_size.size()));
+                if (connection_context_.checkIfIsCompleteMessage(read_buffer_)) {
+                    ByteVector message = connection_context_.postprocess_read(read_buffer_);
+                    size_t message_size = read_buffer_.size();
+                    read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + static_cast<int>(message_size));
 
-                    message_handler_(message);
+                    connection_context_.on_message(message);
                 } else {
                     break;
                 }
@@ -176,9 +177,7 @@ public:
             }
 
             if (!ssl_socket_->lowest_layer().is_open()) {
-                if (connection_closed_callback_) {
-                    connection_closed_callback_(get_shared_this());
-                }
+                connection_context_.on_close();
                 return; // Socket is already closed
             }
 
@@ -204,58 +203,9 @@ public:
                         LOG_ERROR("Error closing socket: %s", close_ec.message().c_str());
                     }
 
-                    if (connection_closed_callback_) {
-                        connection_closed_callback_(get_shared_this());
-                    }
+                    connection_context_.on_close();
                 });
         }
     };
 
-    template<typename SendFraming, typename ReceiveFraming>
-    static std::shared_ptr<Session<SendFraming, ReceiveFraming>> createSession(
-        asio::io_context& io_context, asio::ip::tcp::socket socket, asio::ssl::context& ssl_context,
-        const json senderFramingInitialData, const json receiveFramingInitialData) {
-        return std::make_shared<Session<SendFraming, ReceiveFraming>>(
-            io_context, socket, ssl_context, senderFramingInitialData, receiveFramingInitialData);
-    }
-
-    template<typename SendFraming, typename ReceiveFraming>
-    static std::shared_ptr<Session<SendFraming, ReceiveFraming>> connect(
-        asio::io_context& io_context, asio::ssl::context& ssl_context,
-        const std::string& host, const std::string& port,
-        const std::function<void(std::error_code, std::shared_ptr<Session<SendFraming, ReceiveFraming>>)>& callback,
-        const std::function<void(std::shared_ptr<Session<SendFraming, ReceiveFraming>> session, ByteVector message)>& messageCallback,
-        const std::function<void(std::shared_ptr<Session<SendFraming, ReceiveFraming>>)>& closedCallback,
-        const json& senderFramingInitialData, const json& receiveFramingInitialData) {
-        asio::ip::tcp::socket socket(io_context);
-        auto session = std::make_shared<Session<SendFraming, ReceiveFraming>>(
-            io_context, socket, ssl_context, senderFramingInitialData, receiveFramingInitialData);
-
-        asio::ip::tcp::resolver resolver(io_context);
-        auto endpoints = resolver.resolve(host, port);
-
-        asio::async_connect(session->socket(), endpoints,
-            [session, callback, closedCallback, messageCallback](const std::error_code& ec, const asio::ip::tcp::endpoint&) {
-                if (!ec) {
-                    session->ssl_socket_.async_handshake(asio::ssl::stream_base::client,
-                        [session, callback, closedCallback, messageCallback](const std::error_code& handshake_ec) {
-                            if (!handshake_ec) {
-                                session->start(
-                                    [session, messageCallback](const ByteVector& data) {
-                                        messageCallback(session, data);
-                                    },
-                                    closedCallback
-                                );
-                                callback(handshake_ec, session);
-                            } else {
-                                callback(handshake_ec, nullptr);
-                            }
-                        });
-                } else {
-                    callback(ec, nullptr);
-                }
-            });
-
-        return session;
-    }
 };

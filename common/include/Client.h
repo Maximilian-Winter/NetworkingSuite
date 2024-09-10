@@ -50,10 +50,10 @@ public:
 
     template<typename SendFraming, typename ReceiveFraming>
     void connectUDP(const std::string& host, const std::string& port,
-                    const std::function<void(std::error_code, std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>>)>& connect_callback,
+                    const std::function<void(std::error_code, std::shared_ptr<UDPNetworkUtility::Session<SendFraming, ReceiveFraming>>)>& connect_callback,
                     const std::shared_ptr<UDPMessageHandler<SendFraming, ReceiveFraming>>& message_handler,
-                    const std::function<void(std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>>)>& close_callback, json& senderFramingInitialData, json& receiveFramingInitialData) {
-        auto messageHandling = [message_handler](std::shared_ptr<UDPNetworkUtility::Connection<SendFraming, ReceiveFraming>> connection, ByteVector message)
+                    const std::function<void(std::shared_ptr<UDPNetworkUtility::Session<SendFraming, ReceiveFraming>>)>& close_callback, json& senderFramingInitialData, json& receiveFramingInitialData) {
+        auto messageHandling = [message_handler](std::shared_ptr<UDPNetworkUtility::Session<SendFraming, ReceiveFraming>> connection, ByteVector message)
         {
             message_handler->handleMessage(connection, message);
         };
