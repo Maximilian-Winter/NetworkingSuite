@@ -5,6 +5,7 @@
 #pragma once
 #include "HttpMessage.h"
 #include <sstream>
+#include <regex>
 
 class HttpRequest : public HttpMessage {
 public:

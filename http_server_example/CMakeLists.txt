@@ -12,7 +12,6 @@ target_include_directories(http_server PRIVATE
 )
 
 target_link_libraries(http_server PRIVATE
-        common
         ${COMMON_LINK_LIBRARIES}
 )
 
@@ -26,11 +25,10 @@ add_executable(http_client src/client.cpp)
 
 
 target_include_directories(http_client PRIVATE
-        ${CMAKE_SOURCE_DIR}/common/include
+        ${CMAKE_SOURCE_DIR}/networking_suite/include
 )
 
 target_link_libraries(http_client PRIVATE
-        common
         ${COMMON_LINK_LIBRARIES}
 )
 
