@@ -93,7 +93,7 @@ inline std::future<HttpResponse> HttpClient::sendRequest(const std::string& url,
         session->close();
     });
 
-    session_ = connect<HttpMessageFraming, HttpMessageFraming>(io_context_, host, port, context_);
+    session_ = NetworkSession<HttpMessageFraming, HttpMessageFraming>::connect(io_context_, host, port, context_);
 
     return future;
 }

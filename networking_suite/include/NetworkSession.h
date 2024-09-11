@@ -30,6 +30,20 @@ private:
     bool is_ssl_;
 
 public:
+    explicit NetworkSession(asio::io_context& io_context, asio::ip::tcp::socket socket, asio::ssl::context* ssl_context = nullptr)
+    : io_context_(io_context),
+      socket_(std::move(socket)),
+      sessionUuid_(Utilities::generateUuid()),
+      strand_(asio::make_strand(io_context)),
+      buffer_pool_(std::make_shared<BufferPool>(32728)),
+      is_ssl_(ssl_context != nullptr)
+    {
+        if (is_ssl_) {
+            ssl_stream_ = std::make_unique<asio::ssl::stream<asio::ip::tcp::socket&>>(socket_, *ssl_context);
+        }
+        read_buffer_.reserve(buffer_pool_->getBufferSize());
+    }
+
     explicit NetworkSession(asio::io_context& io_context, asio::ssl::context* ssl_context = nullptr)
         : io_context_(io_context),
           socket_(io_context),
@@ -43,7 +57,6 @@ public:
         }
         read_buffer_.reserve(buffer_pool_->getBufferSize());
     }
-
     void start(const SessionContext<NetworkSession, SenderFramingType, ReceiverFramingType>& context) {
         connection_context_ = context;
         connection_context_.set_port(this->shared_from_this());
@@ -77,10 +90,6 @@ public:
     }
 
     void close() {
-        if (is_closed_.exchange(true, std::memory_order_acq_rel)) {
-            return;
-        }
-
         asio::post(strand_, [this, self = this->shared_from_this()]() {
             do_close();
         });
@@ -178,6 +187,11 @@ private:
     }
 
     void do_close() {
+
+        if (is_closed_.exchange(true, std::memory_order_acq_rel)) {
+            return;
+        }
+
         // Clear the write queue
         while (auto opt_buffer = write_queue_.pop()) {
             buffer_pool_->release(*opt_buffer);
@@ -223,39 +237,39 @@ private:
 
         connection_context_.on_close();
     }
+public:
+
+    static std::shared_ptr<NetworkSession> createSession(
+        asio::io_context& io_context,
+        asio::ip::tcp::socket& socket,
+        asio::ssl::context* ssl_context = nullptr)
+    {
+        auto session = std::make_shared<NetworkSession>(io_context, ssl_context);
+        session->socket() = std::move(socket);
+        return session;
+    }
+
+
+    static std::shared_ptr<NetworkSession> connect(
+        asio::io_context& io_context,
+        const std::string& host,
+        const std::string& port,
+        const SessionContext<NetworkSession, SenderFramingType, ReceiverFramingType>& connection_context,
+        asio::ssl::context* ssl_context = nullptr)
+    {
+        auto session = std::make_shared<NetworkSession>(io_context, ssl_context);
+
+        asio::ip::tcp::resolver resolver(io_context);
+        auto endpoints = resolver.resolve(host, port);
+
+        asio::async_connect(session->socket(), endpoints,
+            [session, connection_context](const std::error_code& ec, const asio::ip::tcp::endpoint&) {
+                if (!ec) {
+                    session->start(connection_context);
+                }
+            });
+
+        return session;
+    }
+
 };
-
-// Helper functions for creating sessions and connecting
-template<typename SenderFramingType, typename ReceiverFramingType>
-std::shared_ptr<NetworkSession<SenderFramingType, ReceiverFramingType>> createSession(
-    asio::io_context& io_context,
-    asio::ip::tcp::socket& socket,
-    asio::ssl::context* ssl_context = nullptr)
-{
-    auto session = std::make_shared<NetworkSession<SenderFramingType, ReceiverFramingType>>(io_context, ssl_context);
-    session->socket() = std::move(socket);
-    return session;
-}
-
-template<typename SenderFramingType, typename ReceiverFramingType>
-std::shared_ptr<NetworkSession<SenderFramingType, ReceiverFramingType>> connect(
-    asio::io_context& io_context,
-    const std::string& host,
-    const std::string& port,
-    const SessionContext<NetworkSession<SenderFramingType, ReceiverFramingType>, SenderFramingType, ReceiverFramingType>& connection_context,
-    asio::ssl::context* ssl_context = nullptr)
-{
-    auto session = std::make_shared<NetworkSession<SenderFramingType, ReceiverFramingType>>(io_context, ssl_context);
-
-    asio::ip::tcp::resolver resolver(io_context);
-    auto endpoints = resolver.resolve(host, port);
-
-    asio::async_connect(session->socket(), endpoints,
-        [session, connection_context](const std::error_code& ec, const asio::ip::tcp::endpoint&) {
-            if (!ec) {
-                session->start(connection_context);
-            }
-        });
-
-    return session;
-}

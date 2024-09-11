@@ -64,7 +64,7 @@ private:
         auto http_port = config_->get<unsigned short>("http_port", 80);
         tcp_handler_.set_message_framing_sender(message_framing_);
         tcp_handler_.set_message_framing_receiver(message_framing_2);
-        tcp_handler_.set_message_handler([this](const std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
+        tcp_handler_.set_message_handler([this](const std::shared_ptr<NetworkSession<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
             handleHTTPRequest(session, data);
         });
 
@@ -83,7 +83,7 @@ private:
         }
         ssl_handler_.set_message_framing_sender(ssl_message_framing_);
         ssl_handler_.set_message_framing_receiver(ssl_message_framing_2);
-        ssl_handler_.set_message_handler([this](const std::shared_ptr<SSLNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
+        ssl_handler_.set_message_handler([this](const std::shared_ptr<NetworkSession<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
             handleHTTPSRequest(session, data);
         });
 
@@ -91,11 +91,11 @@ private:
     }
 
 
-    void handleHTTPRequest(const std::shared_ptr<TCPNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
+    void handleHTTPRequest(const std::shared_ptr<NetworkSession<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
         processRequest(session, data);
     }
 
-    void handleHTTPSRequest(const std::shared_ptr<SSLNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
+    void handleHTTPSRequest(const std::shared_ptr<NetworkSession<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
         processRequest(session, data);
     }
 
@@ -162,10 +162,10 @@ private:
         session->close();
     }
 
-    SessionContext<TCPNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>, HttpMessageFraming, HttpMessageFraming> tcp_handler_;
+    SessionContext<NetworkSession<HttpMessageFraming, HttpMessageFraming>, HttpMessageFraming, HttpMessageFraming> tcp_handler_;
     HttpMessageFraming message_framing_;
     HttpMessageFraming message_framing_2;
-    SessionContext<SSLNetworkUtility::Session<HttpMessageFraming, HttpMessageFraming>, HttpMessageFraming, HttpMessageFraming> ssl_handler_;
+    SessionContext<NetworkSession<HttpMessageFraming, HttpMessageFraming>, HttpMessageFraming, HttpMessageFraming> ssl_handler_;
     HttpMessageFraming ssl_message_framing_;
     HttpMessageFraming ssl_message_framing_2;
     std::shared_ptr<Config> config_;
