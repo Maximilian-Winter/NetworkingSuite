@@ -33,132 +33,18 @@ public:
     std::future<HttpResponse> post(const std::string& url, const std::string& body, const std::unordered_map<std::string, std::string>& headers = {});
 
 private:
-    void load_cert_file(const std::string& file_path) const
-    {
-        std::error_code ec;
-        ssl_context_->load_verify_file(file_path, ec);
-        if (ec) {
-            LOG_ERROR("Failed to load certificate file: %s. Error: %s", file_path.c_str(), ec.message().c_str());
-            throw std::runtime_error("Failed to load certificate file");
-        }
-    }
+    void load_cert_file(const std::string& file_path) const;
 
-    void load_default_cert_file() {
-#ifdef _WIN32
-        load_windows_cert_store();
-#else
-        load_unix_cert_file();
-#endif
-    }
+    void load_default_cert_file();
 
 #ifdef _WIN32
-    void load_windows_cert_store() {
-        HCERTSTORE hStore = CertOpenSystemStore(0, "ROOT");
-        if (!hStore) {
-            LOG_ERROR("Failed to open Windows certificate store");
-            throw std::runtime_error("Failed to open Windows certificate store");
-        }
-
-        X509_STORE* store = SSL_CTX_get_cert_store(ssl_context_->native_handle());
-
-        PCCERT_CONTEXT pContext = nullptr;
-        while ((pContext = CertEnumCertificatesInStore(hStore, pContext)) != nullptr) {
-            X509* x509 = d2i_X509(nullptr,
-                (const unsigned char**)&pContext->pbCertEncoded,
-                pContext->cbCertEncoded);
-            if (x509) {
-                X509_STORE_add_cert(store, x509);
-                X509_free(x509);
-            }
-        }
-
-        CertCloseStore(hStore, 0);
-        LOG_INFO("Successfully loaded certificates from Windows certificate store");
-    }
+    void load_windows_cert_store() const;
 #else
-    void load_unix_cert_file() {
-        const std::vector<std::string> default_cert_paths = {
-            "/etc/ssl/certs/ca-certificates.crt",  // Debian/Ubuntu/Gentoo etc.
-            "/etc/pki/tls/certs/ca-bundle.crt",    // Fedora/RHEL 6
-            "/etc/ssl/ca-bundle.pem",              // OpenSUSE
-            "/etc/pki/tls/cacert.pem",             // OpenELEC
-            "/etc/ssl/cert.pem",                   // MacOS
-        };
-
-        for (const auto& path : default_cert_paths) {
-            std::error_code ec;
-            ssl_context_->load_verify_file(path, ec);
-            if (!ec) {
-                LOG_INFO("Successfully loaded certificates from: %s", path.c_str());
-                return;
-            }
-        }
-
-        LOG_ERROR("Failed to load any default certificate files");
-        throw std::runtime_error("No valid certificate file found");
-    }
+    void load_unix_cert_file();
 #endif
 
-    bool verify_certificate(bool preverified, asio::ssl::verify_context& ctx) {
-        X509* cert = X509_STORE_CTX_get_current_cert(ctx.native_handle());
-        if (!cert) {
-            LOG_ERROR("No certificate found in verify context");
-            return false;
-        }
+    bool verify_certificate(bool preverified, asio::ssl::verify_context& ctx) const;
 
-        char subject_name[256];
-        X509_NAME_oneline(X509_get_subject_name(cert), subject_name, sizeof(subject_name));
-        LOG_INFO("Verifying certificate: %s", subject_name);
-
-        if (!preverified) {
-            int err = X509_STORE_CTX_get_error(ctx.native_handle());
-            LOG_ERROR("Certificate verification failed: %s", X509_verify_cert_error_string(err));
-
-            if (allow_self_signed_ && err == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT) {
-                LOG_WARNING("Allowing self-signed certificate");
-                return true;
-            }
-        }
-
-        return preverified;
-    }
-
-
-    static bool verify_hostname(const std::string& hostname, bool preverified, asio::ssl::verify_context& ctx) {
-        if (!preverified)
-            return false;
-
-        X509* cert = X509_STORE_CTX_get_current_cert(ctx.native_handle());
-
-        char subject_name[256];
-        // Check Common Name
-        X509_NAME_oneline(X509_get_subject_name(cert), subject_name, 256);
-        char cn[256];
-        if (X509_NAME_get_text_by_NID(X509_get_subject_name(cert), NID_commonName, cn, sizeof(cn)) > 0) {
-            if (hostname == cn)
-                return true;
-        }
-
-        // Check Subject Alternative Names
-        GENERAL_NAMES* san_names = static_cast<GENERAL_NAMES*>(
-            X509_get_ext_d2i(cert, NID_subject_alt_name, nullptr, nullptr));
-
-        if (san_names) {
-            int san_names_nb = sk_GENERAL_NAME_num(san_names);
-            for (int i = 0; i < san_names_nb; i++) {
-                const GENERAL_NAME* current_name = sk_GENERAL_NAME_value(san_names, i);
-                if (current_name->type == GEN_DNS) {
-                    char const* dns_name = reinterpret_cast<char const*>(
-                        ASN1_STRING_get0_data(current_name->d.dNSName));
-                    if (hostname == dns_name)
-                        return true;
-                }
-            }
-            GENERAL_NAMES_free(san_names);
-        }
-
-        return false;
-    }
     bool is_ssl_ = false;
     bool allow_self_signed_;
     Config config_;
@@ -176,14 +62,10 @@ inline HttpClient::HttpClient(asio::io_context& io_context, const std::string& c
           io_context_(io_context),
           allow_self_signed_(allow_self_signed)
 {
-    std::string defaultLevel = "INFO";
-    auto log_level = config_.get<std::string>("log_level", "INFO");
-    auto log_file = config_.get<std::string>("log_file", "client.log");
-    auto log_file_size_in_mb = config_.get<float>("max_log_file_size_in_mb", 1.0f);
     AsyncLogger& logger = AsyncLogger::getInstance();
-    logger.setLogLevel(AsyncLogger::parseLogLevel(log_level));
+    logger.setLogLevel(AsyncLogger::parseLogLevel("ERROR"));
     logger.addDestination(std::make_shared<AsyncLogger::ConsoleDestination>());
-    logger.addDestination(std::make_shared<AsyncLogger::FileDestination>(log_file, log_file_size_in_mb * (1024 * 1024)));
+    logger.addDestination(std::make_shared<AsyncLogger::FileDestination>("client.log", 1 * (1024 * 1024)));
     SSL_load_error_strings();
     OpenSSL_add_all_algorithms();
 
@@ -247,6 +129,99 @@ inline std::future<HttpResponse> HttpClient::post(const std::string& url, const 
 
     return sendRequest(url, request);
 }
+
+inline void HttpClient::load_cert_file(const std::string &file_path) const
+{
+    std::error_code ec;
+    ssl_context_->load_verify_file(file_path, ec);
+    if (ec) {
+        LOG_ERROR("Failed to load certificate file: %s. Error: %s", file_path.c_str(), ec.message().c_str());
+        throw std::runtime_error("Failed to load certificate file");
+    }
+}
+
+inline void HttpClient::load_default_cert_file()
+{
+#ifdef _WIN32
+    load_windows_cert_store();
+#else
+        load_unix_cert_file();
+#endif
+}
+
+#ifdef _WIN32
+inline void HttpClient::load_windows_cert_store() const
+{
+    HCERTSTORE hStore = CertOpenSystemStore(0, "ROOT");
+    if (!hStore) {
+        LOG_ERROR("Failed to open Windows certificate store");
+        throw std::runtime_error("Failed to open Windows certificate store");
+    }
+
+    X509_STORE* store = SSL_CTX_get_cert_store(ssl_context_->native_handle());
+
+    PCCERT_CONTEXT pContext = nullptr;
+    while ((pContext = CertEnumCertificatesInStore(hStore, pContext)) != nullptr) {
+        X509* x509 = d2i_X509(nullptr,
+                              (const unsigned char**)&pContext->pbCertEncoded,
+                              pContext->cbCertEncoded);
+        if (x509) {
+            X509_STORE_add_cert(store, x509);
+            X509_free(x509);
+        }
+    }
+
+    CertCloseStore(hStore, 0);
+    LOG_INFO("Successfully loaded certificates from Windows certificate store");
+}
+
+inline bool HttpClient::verify_certificate(bool preverified, asio::ssl::verify_context &ctx) const
+{
+    X509* cert = X509_STORE_CTX_get_current_cert(ctx.native_handle());
+    if (!cert) {
+        LOG_ERROR("No certificate found in verify context");
+        return false;
+    }
+
+    char subject_name[256];
+    X509_NAME_oneline(X509_get_subject_name(cert), subject_name, sizeof(subject_name));
+    LOG_INFO("Verifying certificate: %s", subject_name);
+
+    if (!preverified) {
+        int err = X509_STORE_CTX_get_error(ctx.native_handle());
+        LOG_ERROR("Certificate verification failed: %s", X509_verify_cert_error_string(err));
+
+        if (allow_self_signed_ && err == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT) {
+            LOG_WARNING("Allowing self-signed certificate");
+            return true;
+        }
+    }
+
+    return preverified;
+}
+#else
+void load_unix_cert_file() {
+    const std::vector<std::string> default_cert_paths = {
+        "/etc/ssl/certs/ca-certificates.crt",  // Debian/Ubuntu/Gentoo etc.
+        "/etc/pki/tls/certs/ca-bundle.crt",    // Fedora/RHEL 6
+        "/etc/ssl/ca-bundle.pem",              // OpenSUSE
+        "/etc/pki/tls/cacert.pem",             // OpenELEC
+        "/etc/ssl/cert.pem",                   // MacOS
+    };
+
+    for (const auto& path : default_cert_paths) {
+        std::error_code ec;
+        ssl_context_->load_verify_file(path, ec);
+        if (!ec) {
+            LOG_INFO("Successfully loaded certificates from: %s", path.c_str());
+            return;
+        }
+    }
+
+    LOG_ERROR("Failed to load any default certificate files");
+    throw std::runtime_error("No valid certificate file found");
+}
+#endif
 
 inline std::future<HttpResponse> HttpClient::sendRequest(const std::string& url, HttpRequest& request) {
     auto promise = std::make_shared<std::promise<HttpResponse>>();
