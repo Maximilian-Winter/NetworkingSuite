@@ -11,7 +11,6 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 # Find required packages
 find_package(Threads REQUIRED)
 find_package(CURL REQUIRED)
-find_package(PortAudio REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)  # Add OpenSSL package
 # Print nlohmann JSON include directory for debugging
@@ -57,7 +56,6 @@ function(add_common_settings target)
     )
 endfunction()
 
-add_subdirectory(audio)
 add_subdirectory(echo_server_example)
 add_subdirectory(http_server_example)
 
