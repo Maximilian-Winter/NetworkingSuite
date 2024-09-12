@@ -19,6 +19,17 @@ template<typename SessionType, typename SenderFramingType, typename ReceiverFram
 class SessionContext
 {
 public:
+    using ConnectedCallback = std::function<void(const std::shared_ptr<SessionType> &port)>;
+    using ClosedCallback = std::function<void(const std::shared_ptr<SessionType> &port)>;
+    using MessageHandler = std::function<void(const std::shared_ptr<SessionType> &port, const ByteVector &)>;
+    using PreProcessor = std::function<ByteVector(const ByteVector &)>;
+    using PostProcessor = std::function<ByteVector(const ByteVector &)>;
+    using IsCompleteMessageCheck= std::function<bool(const ByteVector&)>;
+    using ErrorHandler = std::function<void(const std::shared_ptr<SessionType> &port, const std::error_code &ec, const std::string &what)>;
+
+    SessionContext() = default;
+    ~SessionContext() = default;
+
     SessionContext(const SessionContext &other)
         : session_(other.session_),
           connected_callback_(other.connected_callback_),
@@ -28,6 +39,7 @@ public:
           receive_framing_(other.receive_framing_),
           write_preprocessor_(other.write_preprocessor_),
           read_postprocessor_(other.read_postprocessor_),
+          error_handler_(other.error_handler_),
           is_complete_message_check_(other.is_complete_message_check_)
     {
     }
@@ -41,6 +53,7 @@ public:
           receive_framing_(std::move(other.receive_framing_)),
           write_preprocessor_(std::move(other.write_preprocessor_)),
           read_postprocessor_(std::move(other.read_postprocessor_)),
+          error_handler_(std::move(other.error_handler_)),
           is_complete_message_check_(std::move(other.is_complete_message_check_))
     {
     }
@@ -57,6 +70,7 @@ public:
         receive_framing_ = other.receive_framing_;
         write_preprocessor_ = other.write_preprocessor_;
         read_postprocessor_ = other.read_postprocessor_;
+        error_handler_ = other.error_handler_;
         is_complete_message_check_ = other.is_complete_message_check_;
         return *this;
     }
@@ -73,21 +87,10 @@ public:
         receive_framing_ = std::move(other.receive_framing_);
         write_preprocessor_ = std::move(other.write_preprocessor_);
         read_postprocessor_ = std::move(other.read_postprocessor_);
+        error_handler_ = std::move(other.error_handler_);
         is_complete_message_check_ = std::move(other.is_complete_message_check_);
         return *this;
     }
-
-    using ConnectedCallback = std::function<void(const std::shared_ptr<SessionType> &port)>;
-    using ClosedCallback = std::function<void(const std::shared_ptr<SessionType> &port)>;
-    using MessageHandler = std::function<void(const std::shared_ptr<SessionType> &port, const ByteVector &)>;
-    using PreProcessor = std::function<ByteVector(const ByteVector &)>;
-    using PostProcessor = std::function<ByteVector(const ByteVector &)>;
-    using IsCompleteMessageCheck= std::function<bool(const ByteVector&)>;
-
-        SessionContext() = default;
-    ~SessionContext() = default;
-
-
 
     void set_connected_callback(ConnectedCallback callback)
     {
@@ -172,11 +175,25 @@ public:
     {
         return is_complete_message_check_ ? is_complete_message_check_(data) : true;
     }
-    void set_port(std::shared_ptr<SessionType> port)
+    void set_session(std::shared_ptr<SessionType> port)
     {
         session_ = std::move(port);
     }
 
+
+
+    void set_error_handler(ErrorHandler handler)
+    {
+        error_handler_ = std::move(handler);
+    }
+
+    void on_error(const std::error_code &ec, const std::string &what)
+    {
+        if (error_handler_)
+        {
+            error_handler_(session_, ec, what);
+        }
+    }
 private:
     void set_write_preprocessor(PreProcessor processor)
     {
@@ -203,6 +220,8 @@ private:
 
     PreProcessor write_preprocessor_;
     PostProcessor read_postprocessor_;
+
+    ErrorHandler error_handler_{};
 
     IsCompleteMessageCheck is_complete_message_check_;
 };

@@ -6,10 +6,10 @@
 
 int main() {
     asio::io_context io_context;
-    HttpClient client(io_context);
+    HttpClient client(io_context, "", true);
 
     // GET request
-    auto future_get = client.get("http://localhost/greet?name=John");
+    auto future_get = client.get("https://localhost/greet?name=John");
     io_context.run();
     HttpResponse response_get = future_get.get();
     std::cout << "GET Response: " << response_get.toString() << std::endl;

@@ -45,7 +45,7 @@ public:
 
         void start(const SessionContext<Session, SenderFramingType, ReceiverFramingType>& connection_context) {
             connection_context_ = connection_context;
-            connection_context_.set_port(get_shared_this());
+            connection_context_.set_session(get_shared_this());
             connection_context_.on_connect();
             do_receive();
         }
