@@ -57,7 +57,7 @@ public:
 
 private:
 
-    void handleEcho(const std::shared_ptr<TCPNetworkUtility::Session<TCPMagicNumberFraming, TCPMagicNumberFraming>>& endpoint, const ByteVector& data) {
+    void handleEcho(const std::shared_ptr<S<TCPMagicNumberFraming, TCPMagicNumberFraming>>& endpoint, const ByteVector& data) {
         NetworkMessages::BinaryMessage<NetworkMessages::ChatMessage> binary_message(0, NetworkMessages::ChatMessage());
         size_t offset = 0;
         binary_message.deserialize(data, offset);

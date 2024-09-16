@@ -8,7 +8,7 @@ add_executable(echo_server src/server.cpp)
 
 
 target_include_directories(echo_server PRIVATE
-        ${CMAKE_SOURCE_DIR}/common/include
+        ${CMAKE_SOURCE_DIR}/networking_suite/include
 )
 
 target_link_libraries(echo_server PRIVATE
@@ -26,7 +26,7 @@ add_executable(echo_client src/client.cpp)
 
 
 target_include_directories(echo_client PRIVATE
-        ${CMAKE_SOURCE_DIR}/common/include
+        ${CMAKE_SOURCE_DIR}/networking_suite/include
 )
 
 target_link_libraries(echo_client PRIVATE

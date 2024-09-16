@@ -73,3 +73,7 @@ Thumbs.db
 /server.csr
 /server.key
 input.mp3
+/examples/http_server_example/dh2048.pem
+/examples/http_server_example/server.crt
+/examples/http_server_example/server.csr
+/examples/http_server_example/server.key

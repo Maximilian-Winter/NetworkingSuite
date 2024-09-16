@@ -38,4 +38,5 @@ set_target_properties(http_client PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
+configure_file(${CMAKE_SOURCE_DIR}/examples/http_server_example/public/test.html ${CMAKE_BINARY_DIR}/bin/public/test.html COPYONLY)
 
