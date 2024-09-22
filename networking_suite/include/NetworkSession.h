@@ -1,7 +1,3 @@
-//
-// Created by maxim on 10.09.2024.
-//
-
 #pragma once
 
 #include <asio.hpp>
@@ -9,6 +5,8 @@
 #include <memory>
 #include <atomic>
 #include <type_traits>
+#include <variant>
+
 #include "BufferPool.h"
 #include "Logger.h"
 #include "SessionContext.h"
@@ -24,9 +22,15 @@ public:
         CLIENT
     };
 
+    enum class ProtocolType
+    {
+        TCP,
+        UDP
+    };
+
 private:
     asio::io_context &io_context_;
-    asio::ip::tcp::socket socket_;
+    std::variant<asio::ip::tcp::socket, asio::ip::udp::socket> socket_;
     SessionRole session_role_;
     std::unique_ptr<asio::ssl::stream<asio::ip::tcp::socket &> > ssl_stream_;
     std::string sessionUuid_;
@@ -39,39 +43,70 @@ private:
     bool is_ssl_;
     bool allow_self_signed_;
     asio::steady_timer shutdown_timer_;
-
+    ProtocolType protocol_type_;
+    asio::ip::udp::endpoint udp_endpoint_;
+    asio::ip::udp::resolver udp_resolver_;
 
 public:
-    explicit NetworkSession(asio::io_context &io_context, asio::ip::tcp::socket socket,
-                            asio::ssl::context *ssl_context = nullptr)
+        // Constructor for new connections
+    explicit NetworkSession(asio::io_context& io_context, ProtocolType protocol_type, asio::ssl::context* ssl_context = nullptr)
         : io_context_(io_context),
-          socket_(std::move(socket)), session_role_(SessionRole::SERVER),
+          socket_(protocol_type == ProtocolType::TCP
+              ? std::variant<asio::ip::tcp::socket, asio::ip::udp::socket>(std::in_place_index<0>, io_context)
+              : std::variant<asio::ip::tcp::socket, asio::ip::udp::socket>(std::in_place_index<1>, io_context, asio::ip::udp::endpoint(asio::ip::udp::v4(), 0))),
+          session_role_(SessionRole::SERVER),
           sessionUuid_(Utilities::generateUuid()),
           strand_(asio::make_strand(io_context)),
-          buffer_pool_(std::make_shared<BufferPool>(32728)),
-          is_ssl_(ssl_context != nullptr), allow_self_signed_(false), shutdown_timer_(io_context)
+          buffer_pool_(std::make_shared<BufferPool>(65536)),
+          is_ssl_(ssl_context != nullptr && protocol_type == ProtocolType::TCP),
+          allow_self_signed_(false),
+          shutdown_timer_(io_context),
+          protocol_type_(protocol_type),
+          udp_resolver_(io_context)
     {
-        if (is_ssl_)
-        {
-            ssl_stream_ = std::make_unique<asio::ssl::stream<asio::ip::tcp::socket &> >(socket_, *ssl_context);
+        if (is_ssl_ && protocol_type == ProtocolType::TCP) {
+            ssl_stream_ = std::make_unique<asio::ssl::stream<asio::ip::tcp::socket&>>(std::get<asio::ip::tcp::socket>(socket_), *ssl_context);
         }
         read_buffer_.reserve(buffer_pool_->getBufferSize());
     }
 
-    explicit NetworkSession(asio::io_context &io_context, asio::ssl::context *ssl_context = nullptr)
+    // Constructor for existing TCP socket
+    explicit NetworkSession(asio::io_context& io_context, asio::ip::tcp::socket socket, asio::ssl::context* ssl_context = nullptr)
         : io_context_(io_context),
-          socket_(io_context), session_role_(SessionRole::SERVER),
+          socket_(std::move(socket)),
+          session_role_(SessionRole::SERVER),
           sessionUuid_(Utilities::generateUuid()),
           strand_(asio::make_strand(io_context)),
-          buffer_pool_(std::make_shared<BufferPool>(32728)),
-          is_ssl_(ssl_context != nullptr), allow_self_signed_(false), shutdown_timer_(io_context)
+          buffer_pool_(std::make_shared<BufferPool>(65536)),
+          is_ssl_(ssl_context != nullptr),
+          allow_self_signed_(false),
+          shutdown_timer_(io_context),
+          protocol_type_(ProtocolType::TCP),
+          udp_resolver_(io_context)
     {
-        if (is_ssl_)
-        {
-            ssl_stream_ = std::make_unique<asio::ssl::stream<asio::ip::tcp::socket &> >(socket_, *ssl_context);
+        if (is_ssl_) {
+            ssl_stream_ = std::make_unique<asio::ssl::stream<asio::ip::tcp::socket&>>(std::get<asio::ip::tcp::socket>(socket_), *ssl_context);
         }
         read_buffer_.reserve(buffer_pool_->getBufferSize());
     }
+
+    // Constructor for existing UDP socket
+    explicit NetworkSession(asio::io_context& io_context, asio::ip::udp::socket socket)
+        : io_context_(io_context),
+          socket_(std::move(socket)),
+          session_role_(SessionRole::SERVER),
+          sessionUuid_(Utilities::generateUuid()),
+          strand_(asio::make_strand(io_context)),
+          buffer_pool_(std::make_shared<BufferPool>(65536)),
+          is_ssl_(false),
+          allow_self_signed_(false),
+          shutdown_timer_(io_context),
+          protocol_type_(ProtocolType::UDP),
+          udp_resolver_(io_context)
+    {
+        read_buffer_.reserve(buffer_pool_->getBufferSize());
+    }
+
 
     void start(const SessionContext<NetworkSession, SenderFramingType, ReceiverFramingType> &context,
                SessionRole session_role = SessionRole::SERVER,
@@ -82,25 +117,42 @@ public:
         connection_context_.set_session(this->shared_from_this());
         session_role_ = session_role;
         allow_self_signed_ = allow_self_signed;
-        if (is_ssl_)
+
+        if (protocol_type_ == ProtocolType::TCP)
         {
-            if (!hostname.empty())
+            if (is_ssl_)
             {
-                if (!SSL_set_tlsext_host_name(ssl_stream_->native_handle(), hostname.c_str()))
+                if (!hostname.empty())
                 {
-                    throw std::runtime_error("Failed to set SNI hostname");
+                    if (!SSL_set_tlsext_host_name(ssl_stream_->native_handle(), hostname.c_str()))
+                    {
+                        throw std::runtime_error("Failed to set SNI hostname");
+                    }
                 }
+                do_ssl_handshake(hostname);
+            } else
+            {
+                connection_context_.on_connect();
+                do_read();
             }
-            do_ssl_handshake(hostname);
         } else
         {
             connection_context_.on_connect();
-            do_read();
+            do_receive();
         }
     }
 
     bool is_closed() const { return is_closed_.load(std::memory_order_acquire); }
-    asio::ip::tcp::socket &socket() { return socket_; }
+
+    auto &socket()
+    {
+        if (protocol_type_ == ProtocolType::TCP)
+        {
+            return std::get<asio::ip::tcp::socket>(socket_);
+        }
+        return std::get<asio::ip::udp::socket>(socket_);
+    }
+
     std::string getSessionUuid() const { return sessionUuid_; }
 
     void write(const ByteVector &message)
@@ -118,7 +170,13 @@ public:
             write_queue_.push(buffer);
             if (write_queue_.size() == 1)
             {
-                do_write();
+                if (protocol_type_ == ProtocolType::TCP)
+                {
+                    do_write();
+                } else
+                {
+                    do_send();
+                }
             }
         });
     }
@@ -165,7 +223,6 @@ private:
                                 LOG_WARNING("Allowing self-signed certificate");
                             }
                         }
-                        // Perform hostname verification here if needed
                     }
                     connection_context_.on_connect();
                     do_read();
@@ -208,10 +265,34 @@ private:
             ssl_stream_->async_read_some(buffer, asio::bind_executor(strand_, read_handler));
         } else
         {
-            socket_.async_read_some(buffer, asio::bind_executor(strand_, read_handler));
+            std::get<asio::ip::tcp::socket>(socket_).
+                    async_read_some(buffer, asio::bind_executor(strand_, read_handler));
         }
     }
 
+    void do_receive()
+    {
+        auto receive_buffer = buffer_pool_->acquire();
+        receive_buffer->resize(buffer_pool_->getBufferSize());
+
+        std::get<asio::ip::udp::socket>(socket_).async_receive_from(
+            asio::buffer(*receive_buffer), udp_endpoint_,
+            asio::bind_executor(strand_, [this, self = this->shared_from_this(), receive_buffer](
+                            const asio::error_code &ec, std::size_t bytes_received)
+                                {
+                                    if (!ec)
+                                    {
+                                        receive_buffer->resize(bytes_received);
+                                        process_read_data(*receive_buffer);
+                                        do_receive();
+                                    } else
+                                    {
+                                        LOG_ERROR("Error in receive: %s", ec.message().c_str());
+                                        close();
+                                    }
+                                    buffer_pool_->release(receive_buffer);
+                                }));
+    }
 
     void process_read_data(const ByteVector &new_data)
     {
@@ -278,83 +359,156 @@ private:
             asio::async_write(*ssl_stream_, asio::buffer(**buffer), asio::bind_executor(strand_, write_handler));
         } else
         {
-            asio::async_write(socket_, asio::buffer(**buffer), asio::bind_executor(strand_, write_handler));
+            asio::async_write(std::get<asio::ip::tcp::socket>(socket_), asio::buffer(**buffer),
+                              asio::bind_executor(strand_, write_handler));
         }
     }
 
+    void do_send()
+    {
+        if (is_closed())
+        {
+            return;
+        }
 
-    void do_close() {
-        if (is_closed_.exchange(true, std::memory_order_acq_rel)) {
+        auto buffer = write_queue_.pop();
+        if (!buffer)
+        {
+            return;
+        }
+
+        std::get<asio::ip::udp::socket>(socket_).async_send_to(
+            asio::buffer(**buffer), udp_endpoint_,
+            asio::bind_executor(strand_, [this, self = this->shared_from_this(), buffer](
+                            const asio::error_code &ec, std::size_t bytes_sent)
+                                {
+                                    buffer_pool_->release(*buffer);
+
+                                    if (!ec)
+                                    {
+                                        LOG_DEBUG("Sent %zu bytes", bytes_sent);
+                                        if (!write_queue_.empty())
+                                        {
+                                            do_send();
+                                        }
+                                    } else
+                                    {
+                                        LOG_ERROR("Error in send: %s", ec.message().c_str());
+                                        close();
+                                    }
+                                }));
+    }
+
+    void do_close()
+    {
+        if (is_closed_.exchange(true, std::memory_order_acq_rel))
+        {
             return;
         }
 
         // Clear the write queue
-        while (auto opt_buffer = write_queue_.pop()) {
+        while (auto opt_buffer = write_queue_.pop())
+        {
             buffer_pool_->release(*opt_buffer);
         }
 
-        if (!socket_.is_open()) {
-            connection_context_.on_close();
-            return;
+        if (protocol_type_ == ProtocolType::TCP)
+        {
+            if (!std::get<asio::ip::tcp::socket>(socket_).is_open())
+            {
+                connection_context_.on_close();
+                return;
+            }
+
+            asio::post(strand_, [this, self = this->shared_from_this()]()
+            {
+                std::error_code ec;
+                std::get<asio::ip::tcp::socket>(socket_).cancel(ec);
+                if (ec)
+                {
+                    LOG_ERROR("Error cancelling pending operations: %s", ec.message().c_str());
+                    connection_context_.on_error(ec, "Error cancelling pending operations");
+                }
+
+                if (is_ssl_)
+                {
+                    initiate_ssl_shutdown();
+                } else
+                {
+                    finish_close();
+                }
+            });
+        } else
+        {
+            if (!std::get<asio::ip::udp::socket>(socket_).is_open())
+            {
+                connection_context_.on_close();
+                return;
+            }
+
+            asio::post(strand_, [this, self = this->shared_from_this()]()
+            {
+                std::error_code ec;
+                std::get<asio::ip::udp::socket>(socket_).close(ec);
+                if (ec)
+                {
+                    LOG_ERROR("Error closing UDP socket: %s", ec.message().c_str());
+                    connection_context_.on_error(ec, "Error closing UDP socket");
+                }
+                connection_context_.on_close();
+            });
         }
-
-        asio::post(strand_, [this, self = this->shared_from_this()]() {
-            std::error_code ec;
-            socket_.cancel(ec);
-            if (ec) {
-                LOG_ERROR("Error cancelling pending operations: %s", ec.message().c_str());
-                connection_context_.on_error(ec, "Error cancelling pending operations");
-            }
-
-            if (is_ssl_) {
-                initiate_ssl_shutdown();
-            } else {
-                finish_close();
-            }
-        });
     }
 
-    void initiate_ssl_shutdown() {
+    void initiate_ssl_shutdown()
+    {
         ssl_stream_->async_shutdown(
-            asio::bind_executor(strand_, [this, self = this->shared_from_this()](const asio::error_code& shutdown_ec) {
+            asio::bind_executor(strand_, [this, self = this->shared_from_this()](const asio::error_code &shutdown_ec)
+            {
                 handle_ssl_shutdown(shutdown_ec);
             })
         );
-
     }
 
-    void handle_ssl_shutdown(const asio::error_code& shutdown_ec) {
-        if (shutdown_ec) {
-            // Check for common, expected SSL shutdown errors
+    void handle_ssl_shutdown(const asio::error_code &shutdown_ec)
+    {
+        if (shutdown_ec)
+        {
             if (shutdown_ec == asio::error::eof ||
                 shutdown_ec == asio::ssl::error::stream_truncated ||
-                ERR_GET_REASON(shutdown_ec.value()) == SSL_R_PROTOCOL_IS_SHUTDOWN) {
+                ERR_GET_REASON(shutdown_ec.value()) == SSL_R_PROTOCOL_IS_SHUTDOWN)
+            {
                 LOG_INFO("SSL shutdown completed with expected condition: %s", shutdown_ec.message().c_str());
-                } else {
-                    LOG_WARNING("Non-critical error during SSL shutdown: %s", shutdown_ec.message().c_str());
-                }
-        } else {
+            } else
+            {
+                LOG_WARNING("Non-critical error during SSL shutdown: %s", shutdown_ec.message().c_str());
+            }
+        } else
+        {
             LOG_INFO("SSL shutdown completed successfully");
         }
 
-        // Proceed with closing the socket regardless of SSL shutdown result
         finish_close();
     }
 
-    void finish_close() {
-        if (!socket_.is_open()) {
+    void finish_close()
+    {
+        if (!std::get<asio::ip::tcp::socket>(socket_).is_open())
+        {
             connection_context_.on_close();
             return;
         }
         std::error_code ec;
-        socket_.shutdown(asio::ip::tcp::socket::shutdown_both, ec);
-        if (ec && ec != asio::error::not_connected) {
+        std::get<asio::ip::tcp::socket>(socket_).shutdown(asio::ip::tcp::socket::shutdown_both, ec);
+        if (ec && ec != asio::error::not_connected)
+        {
             LOG_ERROR("Error shutting down socket: %s", ec.message().c_str());
             connection_context_.on_error(ec, "Error shutting down socket");
         }
 
-        socket_.close(ec);
-        if (ec) {
+        std::get<asio::ip::tcp::socket>(socket_).close(ec);
+        if (ec)
+        {
             LOG_ERROR("Error closing socket: %s", ec.message().c_str());
             connection_context_.on_error(ec, "Error closing socket");
         }
@@ -363,14 +517,14 @@ private:
     }
 
 public:
-    static std::shared_ptr<NetworkSession> connect(
+    static std::shared_ptr<NetworkSession> connect_tcp(
         asio::io_context &io_context,
         const std::string &host,
         const std::string &port,
         const SessionContext<NetworkSession, SenderFramingType, ReceiverFramingType> &connection_context,
         asio::ssl::context *ssl_context = nullptr)
     {
-        auto session = std::make_shared<NetworkSession>(io_context, ssl_context);
+        auto session = std::make_shared<NetworkSession>(io_context, ProtocolType::TCP, ssl_context);
 
         asio::ip::tcp::resolver resolver(io_context);
         auto endpoints = resolver.resolve(host, port);
@@ -385,10 +539,36 @@ public:
                                     session->start(connection_context, SessionRole::CLIENT, host, true);
                                 } else
                                 {
-                                    LOG_ERROR("Connection failed: %s", ec.message().c_str());
-                                    session->connection_context_.on_error(ec, "Connection failed");
+                                    LOG_ERROR("TCP connection failed: %s", ec.message().c_str());
+                                    session->connection_context_.on_error(ec, "TCP connection failed");
                                 }
                             });
+
+        return session;
+    }
+
+    static std::shared_ptr<NetworkSession> connect_udp(
+        asio::io_context &io_context,
+        const std::string &host,
+        const std::string &port,
+        const SessionContext<NetworkSession, SenderFramingType, ReceiverFramingType> &connection_context)
+    {
+        auto session = std::make_shared<NetworkSession>(io_context, ProtocolType::UDP);
+
+        session->udp_resolver_.async_resolve(
+            host, port,
+            [session, connection_context](const asio::error_code &ec, asio::ip::udp::resolver::results_type results)
+            {
+                if (!ec)
+                {
+                    session->udp_endpoint_ = *results.begin();
+                    session->start(connection_context, SessionRole::CLIENT);
+                } else
+                {
+                    LOG_ERROR("UDP resolution failed: %s", ec.message().c_str());
+                    session->connection_context_.on_error(ec, "UDP resolution failed");
+                }
+            });
 
         return session;
     }

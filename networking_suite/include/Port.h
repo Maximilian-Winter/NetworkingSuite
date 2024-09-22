@@ -94,7 +94,7 @@ template< typename SenderFramingType, typename ReceiverFramingType>
 class UdpPort : public Port
 {
 public:
-    UdpPort(asio::io_context &io_context, unsigned short port_number, SessionContext<UDPNetworkUtility::Session<SenderFramingType, ReceiverFramingType>,SenderFramingType, ReceiverFramingType >& connection_context)
+    UdpPort(asio::io_context &io_context, unsigned short port_number, SessionContext<NetworkSession<SenderFramingType, ReceiverFramingType>,SenderFramingType, ReceiverFramingType >& connection_context)
         : Port(io_context, port_number, Protocol::UDP),
           socket_(io_context, asio::ip::udp::endpoint(asio::ip::udp::v4(), port_number)),
             connection_context_(connection_context)
@@ -127,9 +127,8 @@ private:
                     if (connection_context_.checkIfIsCompleteMessage(*receive_buffer))
                     {
                         auto message = connection_context_.postprocess_read(*receive_buffer);
-                        auto connection = std::make_shared<UDPNetworkUtility::Session<SenderFramingType, ReceiverFramingType>>(io_context_);
-                            connection->socket() = std::move(socket_);
-                            connection->endpoint = sender_endpoint_;
+                        auto connection = std::make_shared<NetworkSession<SenderFramingType, ReceiverFramingType>>(io_context_, std::move(socket));
+                            connection->udp_endpoint_ = sender_endpoint_;
                             connection->start(connection_context_);
                             {
                                 std::lock_guard lock(user_mutex);
@@ -149,5 +148,5 @@ private:
     asio::ip::udp::endpoint sender_endpoint_;
     SessionContext<UDPNetworkUtility::Session<SenderFramingType, ReceiverFramingType>,SenderFramingType, ReceiverFramingType>& connection_context_;
     std::unordered_map<std::string, std::shared_ptr<UDPNetworkUtility::Session<SenderFramingType, ReceiverFramingType>> > connected_users_;
-    static constexpr std::size_t buffer_size = 8192;
+    static constexpr std::size_t buffer_size = 65536;
 };
