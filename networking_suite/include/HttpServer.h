@@ -151,12 +151,12 @@ private:
             if (std::regex_match(path, matches, route->regex)) {
                 // Execute pre-handler middlewares
                 RouteContext route_context = {route->pattern, route->regex};
-                executeMiddlewares(route->pre_middlewares, request, response, [&]() {
+                executeMiddlewares(route->pre_middlewares,route_context, request, response, [&]() {
                     // Execute the main handler
                     route->handler(route_context, request, response);
 
                     // Execute post-handler middlewares
-                    executeMiddlewares(route->post_middlewares, request, response, []() {});
+                    executeMiddlewares(route->post_middlewares,route_context, request, response, []() {});
                 });
 
                 route_handled = true;
