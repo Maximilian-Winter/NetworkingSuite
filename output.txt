@@ -1,0 +1,3446 @@
+<file_overview>
+Total files: 25
+Date generated: 2024-09-16 04:47:31
+Folder Structure:
+├── examples/
+│   └── http_server_example/
+│       ├── public/
+│       └── src/
+│           ├── client.cpp
+│           └── server.cpp
+└── networking_suite/
+    └── include/
+        ├── AsioThreadPool.h
+        ├── BinaryData.h
+        ├── BufferPool.h
+        ├── Client.h
+        ├── Config.h
+        ├── FileServer.h
+        ├── HttpBody.h
+        ├── HttpClient.h
+        ├── HttpHeader.h
+        ├── HttpMessage.h
+        ├── HttpMessageFraming.h
+        ├── HttpParser.h
+        ├── HttpRequest.h
+        ├── HttpResponse.h
+        ├── HttpServer.h
+        ├── Logger.h
+        ├── NetworkSession.h
+        ├── Port.h
+        ├── Server.h
+        ├── SessionContext.h
+        ├── UDPMessageFraming.h
+        ├── UDPNetworkUtility.h
+        └── Utilities.h
+
+Files included:
+- examples\http_server_example\src\client.cpp
+- examples\http_server_example\src\server.cpp
+- networking_suite\include\AsioThreadPool.h
+- networking_suite\include\BinaryData.h
+- networking_suite\include\BufferPool.h
+- networking_suite\include\Client.h
+- networking_suite\include\Config.h
+- networking_suite\include\FileServer.h
+- networking_suite\include\HttpBody.h
+- networking_suite\include\HttpClient.h
+- networking_suite\include\HttpHeader.h
+- networking_suite\include\HttpMessage.h
+- networking_suite\include\HttpMessageFraming.h
+- networking_suite\include\HttpParser.h
+- networking_suite\include\HttpRequest.h
+- networking_suite\include\HttpResponse.h
+- networking_suite\include\HttpServer.h
+- networking_suite\include\Logger.h
+- networking_suite\include\NetworkSession.h
+- networking_suite\include\Port.h
+- networking_suite\include\Server.h
+- networking_suite\include\SessionContext.h
+- networking_suite\include\UDPMessageFraming.h
+- networking_suite\include\UDPNetworkUtility.h
+- networking_suite\include\Utilities.h
+</file_overview>
+
+<file path="examples\http_server_example\src\client.cpp" lines="19" modified="2024-09-12 02:27:24">
+//
+// Created by maxim on 10.09.2024.
+//
+#include "HttpClient.h"
+
+
+int main() {
+    asio::io_context io_context;
+    HttpClient client(io_context, "", true);
+
+    // GET request
+    auto future_get = client.get("https://google.de");
+    io_context.run();
+    HttpResponse response_get = future_get.get();
+    std::cout << "GET Response: " << response_get.toString() << std::endl;
+
+
+    return 0;
+}
+</file>
+
+<file path="examples\http_server_example\src\server.cpp" lines="71" modified="2024-09-10 16:51:39">
+#include "HttpServer.h"
+#include <iostream>
+#include <sstream>
+
+int main() {
+    HttpServer server("http_server_config_test.json");
+
+    // Example request: http://localhost/
+    server.addRoute("/", [](const RouteContext& context, const HttpRequest& request, HttpResponse& response) {
+        response.setStatusCode(200);
+        response.setStatusMessage("OK");
+        std::string content = "<html><body><h1>Welcome to the HTTP Server</h1></body></html>";
+        response.body().setContent(content);
+        response.header().addField("Content-Type", "text/html");
+        response.header().addField("Content-Length", std::to_string(content.length()));
+    });
+
+
+
+    // Example request: http://localhost/greet?name=John
+    server.addRoute("/greet", [](const RouteContext& context, const HttpRequest& request, HttpResponse& response) {
+        std::unordered_map<std::string, std::string> query_params = request.parseQueryString();
+        const std::string name = query_params.contains("name") ? query_params.at("name") : "Guest";
+
+        std::string content = "Hello, " + name + "!";
+
+        response.body().setContent(content);
+        response.header().addField("Content-Type", "text/plain");
+        response.header().addField("Content-Length", std::to_string(content.length()));
+    });
+
+    // Example request: http://localhost/users/123/posts/42
+    server.addRoute("/users/([^/]+)/posts/([^/]+)", [](const RouteContext& context, const HttpRequest& request, HttpResponse& response) {
+        std::unordered_map<std::string, std::string> route_params = request.extractRouteParams(context.pattern);
+        std::ostringstream oss;
+        oss << "User ID: " << route_params.at("param1") << "\n";
+        oss << "Post ID: " << route_params.at("param2") << "\n";
+        std::string response_string = oss.str();
+        response.body().setContent(response_string);
+        response.header().addField("Content-Type", "text/plain");
+        response.header().addField("Content-Length", std::to_string(response_string.length()));
+    });
+
+    // Example request: http://localhost/api/users/posts/123?sort=date&limit=10
+    server.addRoute("/api/([^/]+)/([^/]+)/([^/]+)", [](const RouteContext& context, const HttpRequest& request, HttpResponse& response) {
+        std::unordered_map<std::string, std::string> query_params = request.parseQueryString();
+        std::unordered_map<std::string, std::string> route_params = request.extractRouteParams(context.pattern);
+        std::ostringstream oss;
+        oss << "API Route Parameters:\n";
+        oss << "  Parameter 1: " << route_params.at("param1") << "\n";
+        oss << "  Parameter 2: " << route_params.at("param2") << "\n";
+        oss << "  Parameter 3: " << route_params.at("param3") << "\n";
+
+        oss << "\nQuery Parameters:\n";
+        for (const auto& [key, value] : query_params) {
+            oss << "  " << key << ": " << value << "\n";
+        }
+
+        std::string response_string = oss.str();
+        response.body().setContent(response_string);
+        response.header().addField("Content-Type", "text/plain");
+        response.header().addField("Content-Length", std::to_string(response_string.length()));
+    });
+    server.start();
+
+    std::cout << "HTTP server started. Press Enter to exit." << std::endl;
+    std::cin.get();
+
+    server.stop();
+    return 0;
+}
+</file>
+
+<file path="networking_suite\include\AsioThreadPool.h" lines="58" modified="2024-09-07 18:48:26">
+//
+// Created by maxim on 19.08.2024.
+//
+
+#pragma once
+#include <asio.hpp>
+#include <thread>
+#include <vector>
+
+class AsioThreadPool {
+public:
+    explicit AsioThreadPool(size_t thread_count = 0)
+            : thread_count_(),
+              io_context_(),
+              work_guard_(asio::make_work_guard(io_context_)) {
+        if (thread_count == 0) {
+            thread_count_ = std::thread::hardware_concurrency();
+        } else
+        {
+            thread_count_ = thread_count;
+        }
+
+    }
+
+    ~AsioThreadPool() {
+        stop();
+    }
+
+    asio::io_context& get_io_context() {
+        return io_context_;
+    }
+
+    void stop() {
+        work_guard_.reset();
+        io_context_.stop();
+        for (auto& thread : threads_) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+    }
+    void start_threads() {
+        threads_.reserve(thread_count_);
+        for (size_t i = 0; i < std::max(static_cast<int>(thread_count_) - 1, 1); ++i) {
+            threads_.emplace_back([this]() {
+                io_context_.run();
+            });
+        }
+
+    }
+private:
+
+    size_t thread_count_;
+    asio::io_context io_context_;
+    asio::executor_work_guard<asio::io_context::executor_type> work_guard_;
+    std::vector<std::thread> threads_;
+};
+</file>
+
+<file path="networking_suite\include\BinaryData.h" lines="357" modified="2024-09-07 23:12:58">
+#pragma once
+
+#include <string>
+#include <vector>
+#include <queue>
+#include <memory>
+#include <stdexcept>
+#include <cstdint>
+#include <cmath>
+
+
+namespace NetworkMessages
+{
+    using byte = std::uint8_t;
+    using ByteVector = std::vector<uint8_t>;
+    class BinaryData
+    {
+    public:
+
+        virtual ~BinaryData() = default;
+
+        // Serialize the message to a byte vector
+        [[nodiscard]] virtual ByteVector serialize() const = 0;
+
+        // Deserialize from a byte vector
+        virtual void deserialize(const ByteVector &data, size_t& offset) = 0;
+
+        // Serialization helpers
+        template<typename T>
+        static void append_bytes(ByteVector &vec, const T &data)
+        {
+            if constexpr (std::is_same_v<T, ByteVector>) {
+                append_byte_vector(vec, data);
+            } else
+            {
+                auto bytes = to_bytes(data);
+                vec.insert(vec.end(), bytes.begin(), bytes.end());
+            }
+
+        }
+
+        template<typename T>
+        static T read_bytes(const ByteVector& data, size_t& offset)
+        {
+           if constexpr (std::is_same_v<T, std::string>) {
+                return read_string_from_bytes(data, offset);
+            } else
+            {
+                if (offset + sizeof(T) > data.size())
+                {
+                    throw std::runtime_error("Not enough data to read");
+                }
+
+                // Check if the offset and sizeof(T) are too large for the system's ptrdiff_t
+                if (offset + sizeof(T) > static_cast<size_t>(std::numeric_limits<std::ptrdiff_t>::max()))
+                {
+                    throw std::runtime_error("Data size too large for this system");
+                }
+
+                // Use ptrdiff_t for iterator arithmetic
+                auto start = data.begin() + static_cast<std::ptrdiff_t>(offset);
+                auto end = start + static_cast<std::ptrdiff_t>(sizeof(T));
+
+                T value = from_bytes<T>(ByteVector(start, end));
+                from_network_order(value);  // Convert from network byte order to host byte order
+                offset += sizeof(T);
+                return value;
+            }
+        }
+
+    private:
+        // Convert network order helpers
+        template<typename T>
+        static void to_network_order(T& value) {
+            if (!is_little_endian()) {
+                char* p = reinterpret_cast<char*>(&value);
+                std::reverse(p, p + sizeof(T));
+            }
+        }
+
+        template<typename T>
+        static void from_network_order(T& value) {
+            if (!is_little_endian()) {
+                char* p = reinterpret_cast<char*>(&value);
+                std::reverse(p, p + sizeof(T));
+            }
+        }
+
+        static bool is_little_endian() {
+            static const int32_t i = 1;
+            return *reinterpret_cast<const int8_t*>(&i) == 1;
+        }
+
+        template<typename T>
+        static ByteVector to_bytes(const T& object) {
+            if constexpr (std::is_same_v<T, std::string>) {
+                return string_to_bytes(object);
+            } else {
+                static_assert(std::is_trivially_copyable<T>::value, "not a TriviallyCopyable type");
+                ByteVector bytes;
+                bytes.reserve(sizeof(T));  // Reserve space but don't initialize
+                T network_object = object;
+                to_network_order(network_object);
+                const byte* begin = reinterpret_cast<const byte*>(std::addressof(network_object));
+                const byte* end = begin + sizeof(T);
+                bytes.insert(bytes.end(), begin, end);  // Use insert instead of std::copy
+                return bytes;
+            }
+        }
+
+        template<typename T>
+        static T from_bytes(const ByteVector& bytes) {
+            static_assert(std::is_trivially_copyable<T>::value, "not a TriviallyCopyable type");
+            T object;
+            std::memcpy(&object, bytes.data(), sizeof(T));
+            from_network_order(object);
+            return object;
+        }
+
+        static void append_byte_vector(ByteVector &vec, const ByteVector &data)
+        {
+            vec.insert(vec.end(), data.begin(), data.end());
+        }
+
+        static ByteVector string_to_bytes(const std::string& str) {
+            ByteVector bytes;
+            bytes.reserve(sizeof(uint32_t) + str.size() * 4);  // Worst case: all 4-byte UTF-8
+
+            uint32_t utf8_length = 0;
+            for (char32_t c : str) {
+                if (c <= 0x7F) {
+                    utf8_length += 1;
+                    bytes.push_back(static_cast<byte>(c));
+                } else if (c <= 0x7FF) {
+                    utf8_length += 2;
+                    bytes.push_back(static_cast<byte>(0xC0 | (c >> 6)));
+                    bytes.push_back(static_cast<byte>(0x80 | (c & 0x3F)));
+                } else if (c <= 0xFFFF) {
+                    utf8_length += 3;
+                    bytes.push_back(static_cast<byte>(0xE0 | (c >> 12)));
+                    bytes.push_back(static_cast<byte>(0x80 | ((c >> 6) & 0x3F)));
+                    bytes.push_back(static_cast<byte>(0x80 | (c & 0x3F)));
+                } else {
+                    utf8_length += 4;
+                    bytes.push_back(static_cast<byte>(0xF0 | (c >> 18)));
+                    bytes.push_back(static_cast<byte>(0x80 | ((c >> 12) & 0x3F)));
+                    bytes.push_back(static_cast<byte>(0x80 | ((c >> 6) & 0x3F)));
+                    bytes.push_back(static_cast<byte>(0x80 | (c & 0x3F)));
+                }
+            }
+
+            ByteVector result;
+            result.reserve(sizeof(uint32_t) + utf8_length);
+            append_bytes(result, utf8_length);
+            result.insert(result.end(), bytes.begin(), bytes.end());
+            return result;
+        }
+
+        static std::string read_string_from_bytes(const ByteVector& data, size_t& offset) {
+            if (offset + sizeof(uint32_t) > data.size()) {
+                throw std::runtime_error("Not enough data to read string length");
+            }
+
+            auto utf8_length = read_bytes<uint32_t>(data, offset);
+
+            if (offset + utf8_length > data.size()) {
+                throw std::runtime_error("Not enough data to read string content");
+            }
+
+            std::string result;
+            result.reserve(utf8_length);  // Pre-allocate for efficiency
+            const byte* cur = data.data() + offset;
+            const byte* end = cur + utf8_length;
+
+            while (cur < end) {
+                if ((*cur & 0x80) == 0) {
+                    result.push_back(static_cast<char>(*cur++));
+                } else if ((*cur & 0xE0) == 0xC0) {
+                    if (end - cur < 2) throw std::runtime_error("Invalid UTF-8 sequence");
+                    char32_t codepoint = ((cur[0] & 0x1F) << 6) | (cur[1] & 0x3F);
+                    result.push_back(static_cast<char>(codepoint));
+                    cur += 2;
+                } else if ((*cur & 0xF0) == 0xE0) {
+                    if (end - cur < 3) throw std::runtime_error("Invalid UTF-8 sequence");
+                    char32_t codepoint = ((cur[0] & 0x0F) << 12) | ((cur[1] & 0x3F) << 6) | (cur[2] & 0x3F);
+                    result.push_back(static_cast<char>(codepoint));
+                    cur += 3;
+                } else if ((*cur & 0xF8) == 0xF0) {
+                    if (end - cur < 4) throw std::runtime_error("Invalid UTF-8 sequence");
+                    char32_t codepoint = ((cur[0] & 0x07) << 18) | ((cur[1] & 0x3F) << 12) |
+                                         ((cur[2] & 0x3F) << 6) | (cur[3] & 0x3F);
+                    result.push_back(static_cast<char>(codepoint));
+                    cur += 4;
+                } else {
+                    throw std::runtime_error("Invalid UTF-8 sequence");
+                }
+            }
+
+            offset += utf8_length;
+            return result;
+        }
+
+    };
+
+    class MessageTypeData : BinaryData
+    {
+    public:
+        short Type{};
+
+        [[nodiscard]] ByteVector serialize() const override
+        {
+            ByteVector data;
+            append_bytes(data, Type);
+            return data;
+        }
+
+        void deserialize(const ByteVector &data, size_t& offset) override
+        {
+            Type = read_bytes<short>(data, offset);
+        }
+
+    };
+
+    template<typename T>
+    class BinaryMessage : public BinaryData
+    {
+    public:
+        BinaryMessage(short messageType, const T &payload)
+                : messageType(messageType), messagePayload(payload)
+        {
+            static_assert(std::is_base_of_v<BinaryData, T>, "T must inherit from BinaryData");
+        }
+
+        [[nodiscard]] ByteVector serialize() const override
+        {
+            ByteVector data;
+            MessageTypeData typeData;
+            typeData.Type = messageType;
+            auto messageTypeData = typeData.serialize();
+            data.insert(data.end(), messageTypeData.begin(), messageTypeData.end());
+            auto payloadData = messagePayload.serialize();
+            data.insert(data.end(), payloadData.begin(), payloadData.end());
+            return data;
+        }
+
+        void deserialize(const ByteVector &data, size_t &offset) override
+        {
+            if (data.size() - offset < sizeof(short))
+            {
+                throw std::runtime_error("Invalid data: too short to contain message type");
+            }
+            MessageTypeData typeData;
+            typeData.deserialize(data, offset);
+            messageType = typeData.Type;
+            messagePayload.deserialize(data, offset);
+        }
+
+        [[nodiscard]] short getMessageType() const { return messageType; }
+        T &getPayload() { return messagePayload; }
+
+    private:
+        short messageType;
+        T messagePayload;
+    };
+
+
+
+    class Error : public BinaryData
+    {
+    public:
+        Error() = default;
+
+        explicit Error(const std::string &error_message)
+            : ErrorMessage(error_message)
+        {
+        }
+
+        std::string ErrorMessage;
+
+        [[nodiscard]] ByteVector serialize() const override
+        {
+            ByteVector data;
+            append_bytes(data, ErrorMessage);
+            return data;
+        }
+
+        void deserialize(const ByteVector &data, size_t &offset) override
+        {
+            ErrorMessage = read_bytes<std::string>(data, offset);
+        }
+    };
+    class ChatMessage : public BinaryData
+    {
+    public:
+        ChatMessage() = default;
+
+        explicit ChatMessage(const std::string &sender, const std::string &message)
+            : Sender(sender), Message(message)
+        {
+        }
+        std::string Sender;
+        std::string Message;
+
+        [[nodiscard]] ByteVector serialize() const override
+        {
+            ByteVector data;
+            append_bytes(data, Sender);
+            append_bytes(data, Message);
+            return data;
+        }
+
+        void deserialize(const ByteVector &data, size_t &offset) override
+        {
+            Sender = read_bytes<std::string>(data, offset);
+            Message = read_bytes<std::string>(data, offset);
+        }
+    };
+    enum class MessageType : short
+    {
+        ChatMessage,
+        Error
+    };
+
+    class MessageFactory
+    {
+    public:
+        template<typename T>
+        static std::unique_ptr<BinaryMessage<T>> createMessage(MessageType type, const T &payload)
+        {
+            return std::make_unique<BinaryMessage<T>>(static_cast<short>(type), payload);
+        }
+
+        static MessageType getMessageTypeFromBytes(const ByteVector &data)
+        {
+            if (data.size() < sizeof(short))
+            {
+                throw std::runtime_error("Invalid message data: too short to contain message type");
+            }
+            MessageTypeData type;
+            size_t offset = 0;
+            type.deserialize(data, offset);
+
+            return static_cast<MessageType>(type.Type);
+        }
+
+    private:
+        template<typename T>
+        static std::unique_ptr<BinaryMessage<T>>
+        createAndDeserialize(MessageType type, const std::vector<byte> &data)
+        {
+            auto message = std::make_unique<BinaryMessage<T>>(static_cast<short>(type), T{});
+            size_t offset = 0;
+            message->deserialize(data, offset);
+            return message;
+        }
+    };
+}
+</file>
+
+<file path="networking_suite\include\BufferPool.h" lines="121" modified="2024-09-07 11:18:17">
+//
+// Created by maxim on 07.09.2024.
+//
+
+#pragma once
+#include <functional>
+#include <memory>
+#include <utility>
+#include <vector>
+#include <atomic>
+#include <array>
+#include <optional>
+#include <cstddef>
+
+using ByteVector = std::vector<uint8_t>;
+
+template<typename T, size_t Capacity>
+class LockFreeQueue {
+    struct Node {
+        std::atomic<T*> data;
+        std::atomic<size_t> next;
+    };
+
+    std::array<Node, Capacity> buffer_;
+    std::atomic<size_t> head_{0};
+    std::atomic<size_t> tail_{0};
+    std::atomic<size_t> size_{0};
+
+public:
+    LockFreeQueue() {
+        for (size_t i = 0; i < Capacity; ++i) {
+            buffer_[i].data.store(nullptr, std::memory_order_relaxed);
+            buffer_[i].next.store((i + 1) % Capacity, std::memory_order_relaxed);
+        }
+    }
+
+    bool push(T item) {
+        T* new_data = new T(std::move(item));
+        size_t curr_tail = tail_.load(std::memory_order_relaxed);
+        for (;;) {
+            if (size_.load(std::memory_order_acquire) == Capacity) {
+                delete new_data;
+                return false;  // Queue is full
+            }
+            size_t next = buffer_[curr_tail].next.load(std::memory_order_relaxed);
+            if (tail_.compare_exchange_weak(curr_tail, next, std::memory_order_release, std::memory_order_relaxed)) {
+                buffer_[curr_tail].data.store(new_data, std::memory_order_release);
+                size_.fetch_add(1, std::memory_order_release);
+                return true;
+            }
+        }
+    }
+
+    std::optional<T> pop() {
+        size_t curr_head = head_.load(std::memory_order_relaxed);
+        for (;;) {
+            if (size_.load(std::memory_order_acquire) == 0) {
+                return std::nullopt;  // Queue is empty
+            }
+            T* data = buffer_[curr_head].data.load(std::memory_order_acquire);
+            size_t next = buffer_[curr_head].next.load(std::memory_order_relaxed);
+            if (head_.compare_exchange_weak(curr_head, next, std::memory_order_release, std::memory_order_relaxed)) {
+                std::optional<T> result;
+                if (data) {
+                    result = std::move(*data);
+                    delete data;
+                    buffer_[curr_head].data.store(nullptr, std::memory_order_release);
+                    size_.fetch_sub(1, std::memory_order_release);
+                }
+                return result;
+            }
+        }
+    }
+
+    bool empty() const {
+        return size_.load(std::memory_order_acquire) == 0;
+    }
+
+    size_t size() const {
+        return size_.load(std::memory_order_acquire);
+    }
+};
+
+class BufferPool {
+public:
+
+    explicit BufferPool(const size_t buffer_size, const size_t initial_pool_size = 100)
+        : buffer_size_(buffer_size) {
+        for (size_t i = 0; i < initial_pool_size; ++i) {
+            free_buffers_.push(new ByteVector(buffer_size));
+        }
+    }
+
+    ~BufferPool() {
+        while (auto opt_buffer = free_buffers_.pop()) {
+            delete *opt_buffer;
+        }
+    }
+
+    ByteVector* acquire() {
+        if (auto opt_buffer = free_buffers_.pop()) {
+            return *opt_buffer;
+        }
+        return new ByteVector(buffer_size_);
+    }
+
+    size_t getBufferSize() const
+    {
+        return buffer_size_;
+    }
+    void release(ByteVector* buffer) {
+        buffer->clear();
+        if (!free_buffers_.push(buffer)) {
+            delete buffer;  // If queue is full, delete the buffer
+        }
+    }
+
+private:
+    size_t buffer_size_;
+    LockFreeQueue<ByteVector*, 1024> free_buffers_;  // Adjust capacity as needed
+};
+</file>
+
+<file path="networking_suite\include\Client.h" lines="79" modified="2024-09-10 16:35:20">
+//
+// Created by maxim on 07.09.2024.
+//
+
+#pragma once
+
+#include <memory>
+#include <functional>
+
+
+#include "AsioThreadPool.h"
+#include "TCPNetworkUtility.h"
+#include "UDPNetworkUtility.h"
+#include "Config.h"
+
+class Client {
+public:
+    Client(std::shared_ptr<AsioThreadPool> thread_pool, const Config& config)
+        : thread_pool_(std::move(thread_pool)), config_(config)
+    {
+
+        //auto port = config_.get<short>("port", 8080);
+        std::string defaultLevel = "DEBUG";
+        auto log_level = config_.get<std::string>("log_level", "INFO");
+        auto log_file = config_.get<std::string>("log_file", "client.log");
+        auto log_file_size_in_mb = config_.get<float>("max_log_file_size_in_mb", 1.0f);
+        AsyncLogger& logger = AsyncLogger::getInstance();
+        logger.setLogLevel(AsyncLogger::parseLogLevel(log_level));
+        logger.addDestination(std::make_shared<AsyncLogger::ConsoleDestination>());
+        logger.addDestination(std::make_shared<AsyncLogger::FileDestination>(log_file, log_file_size_in_mb * (1024 * 1024)));
+    }
+
+    template<typename SendFraming, typename ReceiveFraming>
+    void connectTCP(const std::string& host, const std::string& port,
+                const std::function<void(std::error_code, std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>>)>& connect_callback,
+                    const std::shared_ptr<TCPMessageHandler<SendFraming, ReceiveFraming>> &handler,
+                    const std::function<void(std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>>)>& close_callback, const json senderFramingInitialData, const json receiveFramingInitialData) {
+
+        auto messageHandling = [handler](std::shared_ptr<TCPNetworkUtility::Session<SendFraming, ReceiveFraming>> session, ByteVector message)
+        {
+            handler->handleMessage(session, message);
+        };
+        TCPNetworkUtility::connect<SendFraming, ReceiveFraming>(
+            thread_pool_->get_io_context(), host, port,
+            connect_callback,
+            messageHandling,
+            close_callback,senderFramingInitialData, receiveFramingInitialData
+        );
+    }
+
+    template<typename SendFraming, typename ReceiveFraming>
+    void connectUDP(const std::string& host, const std::string& port,
+                    const std::function<void(std::error_code, std::shared_ptr<UDPNetworkUtility::Session<SendFraming, ReceiveFraming>>)>& connect_callback,
+                    const std::shared_ptr<UDPMessageHandler<SendFraming, ReceiveFraming>>& message_handler,
+                    const std::function<void(std::shared_ptr<UDPNetworkUtility::Session<SendFraming, ReceiveFraming>>)>& close_callback, json& senderFramingInitialData, json& receiveFramingInitialData) {
+        auto messageHandling = [message_handler](std::shared_ptr<UDPNetworkUtility::Session<SendFraming, ReceiveFraming>> connection, ByteVector message)
+        {
+            message_handler->handleMessage(connection, message);
+        };
+        UDPNetworkUtility::connect<SendFraming, ReceiveFraming>(
+            thread_pool_->get_io_context(), host, port,
+            connect_callback,
+            messageHandling,
+            close_callback,senderFramingInitialData, receiveFramingInitialData
+        );
+    }
+
+    void start() {
+        thread_pool_->start_threads();
+    }
+
+    void stop() {
+        thread_pool_->stop();
+    }
+
+private:
+    std::shared_ptr<AsioThreadPool> thread_pool_;
+    Config config_;
+};
+</file>
+
+<file path="networking_suite\include\Config.h" lines="66" modified="2024-08-08 01:50:07">
+//
+// Created by maxim on 30.07.2024.
+//
+
+#pragma once
+
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <nlohmann/json.hpp>
+
+class Config {
+private:
+    nlohmann::json config;
+
+public:
+    Config() = default;
+
+    bool load(const std::string& filename) {
+        try {
+            std::ifstream file(filename);
+            if (!file.is_open()) {
+                std::cerr << "Failed to open config file: " << filename << std::endl;
+                return false;
+            }
+            file >> config;
+            return true;
+        } catch (const nlohmann::json::parse_error& e) {
+            std::cerr << "JSON parse error: " << e.what() << std::endl;
+            return false;
+        }
+    }
+
+    template<typename T>
+    T get(const std::string& key, const T& default_value) const {
+        try {
+            return config.at(key).get<T>();
+        } catch (const nlohmann::json::out_of_range&) {
+            std::cerr << "Key not found: " << key << ". Using default value." << std::endl;
+            return default_value;
+        } catch (const nlohmann::json::type_error&) {
+            std::cerr << "Type error for key: " << key << ". Using default value." << std::endl;
+            return default_value;
+        }
+    }
+
+    bool set(const std::string& key, const nlohmann::json& value) {
+        config[key] = value;
+        return true;
+    }
+
+    bool save(const std::string& filename) const {
+        try {
+            std::ofstream file(filename);
+            if (!file.is_open()) {
+                std::cerr << "Failed to open file for writing: " << filename << std::endl;
+                return false;
+            }
+            file << std::setw(4) << config << std::endl;
+            return true;
+        } catch (const std::exception& e) {
+            std::cerr << "Error saving config: " << e.what() << std::endl;
+            return false;
+        }
+    }
+};
+</file>
+
+<file path="networking_suite\include\FileServer.h" lines="67" modified="2024-09-09 00:53:04">
+//
+// Created by maxim on 09.09.2024.
+//
+
+#pragma once
+
+#include <string>
+#include <filesystem>
+#include <fstream>
+#include <unordered_map>
+#include "Logger.h"
+
+class FileServer {
+public:
+    explicit FileServer(const std::string& root_directory)
+        : root_directory_(root_directory) {
+        // Initialize MIME types
+        mime_types_[".html"] = "text/html";
+        mime_types_[".css"] = "text/css";
+        mime_types_[".js"] = "application/javascript";
+        mime_types_[".jpg"] = "image/jpeg";
+        mime_types_[".png"] = "image/png";
+        mime_types_[".gif"] = "image/gif";
+        // Add more MIME types as needed
+    }
+
+    bool serveFile(const std::string& path, std::string& content, std::string& content_type) {
+        std::filesystem::path file_path = std::filesystem::path(root_directory_) / std::filesystem::path(path.substr(1));
+
+        // Ensure the requested file is within the root directory
+        if (!isPathInRoot(file_path)) {
+            LOG_WARNING("Attempted access to file outside root directory: %s", file_path.string().c_str());
+            return false;
+        }
+
+        if (!std::filesystem::exists(file_path)) {
+            return false;
+        }
+
+        std::ifstream file(file_path, std::ios::binary);
+        if (!file) {
+            LOG_ERROR("Failed to open file: %s", file_path.string().c_str());
+            return false;
+        }
+
+        content.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+        content_type = getMimeType(file_path.extension().string());
+        return true;
+    }
+
+private:
+    std::string root_directory_;
+    std::unordered_map<std::string, std::string> mime_types_;
+
+    bool isPathInRoot(const std::filesystem::path& path) const {
+        return std::filesystem::weakly_canonical(path).string().find(
+            std::filesystem::weakly_canonical(root_directory_).string()) == 0;
+    }
+
+    std::string getMimeType(const std::string& extension) const {
+        auto it = mime_types_.find(extension);
+        if (it != mime_types_.end()) {
+            return it->second;
+        }
+        return "application/octet-stream"; // Default MIME type
+    }
+};
+</file>
+
+<file path="networking_suite\include\HttpBody.h" lines="31" modified="2024-09-10 14:20:41">
+//
+// Created by maxim on 10.09.2024.
+//
+
+// HttpBody.h
+#pragma once
+#include <string>
+#include <vector>
+
+class HttpBody {
+public:
+    void setContent(const std::string& content) {
+        content_ = std::vector<uint8_t>(content.begin(), content.end());
+    }
+
+    void setContent(const std::vector<uint8_t>& content) {
+        content_ = content;
+    }
+
+    const std::vector<uint8_t>& getContent() const {
+        return content_;
+    }
+
+    size_t getSize() const {
+        return content_.size();
+    }
+
+private:
+    std::vector<uint8_t> content_;
+};
+</file>
+
+<file path="networking_suite\include\HttpClient.h" lines="280" modified="2024-09-12 02:50:24">
+//
+// Created by maxim on 11.09.2024.
+//
+// HttpClient.h
+#pragma once
+#include <asio.hpp>
+#include <asio/ssl.hpp>
+#include <string>
+#include <stdexcept>
+#include <vector>
+
+
+#include <Config.h>
+#include <functional>
+#include <future>
+#include "NetworkSession.h"
+#include "HttpRequest.h"
+#include "HttpResponse.h"
+#include "HttpMessageFraming.h"
+
+#ifdef _WIN32
+#include <windows.h>
+#include <wincrypt.h>
+#pragma comment(lib, "crypt32.lib")
+#endif
+
+
+class HttpClient {
+public:
+    explicit HttpClient(asio::io_context& io_context, const std::string& cert_file = "", bool allow_self_signed = false);
+
+    std::future<HttpResponse> get(const std::string& url, const std::unordered_map<std::string, std::string>& headers = {});
+    std::future<HttpResponse> post(const std::string& url, const std::string& body, const std::unordered_map<std::string, std::string>& headers = {});
+
+private:
+    void load_cert_file(const std::string& file_path) const;
+
+    void load_default_cert_file();
+
+#ifdef _WIN32
+    void load_windows_cert_store() const;
+#else
+    void load_unix_cert_file();
+#endif
+
+    bool verify_certificate(bool preverified, asio::ssl::verify_context& ctx) const;
+
+    bool is_ssl_ = false;
+    bool allow_self_signed_;
+    Config config_;
+    std::future<HttpResponse> sendRequest(const std::string& url, HttpRequest& request);
+    static void parseUrl(const std::string& url, std::string& host, std::string& port, std::string& path);
+    std::unique_ptr<asio::ssl::context> ssl_context_;
+    asio::io_context& io_context_;
+    HttpMessageFraming message_framing_;
+    SessionContext<NetworkSession<HttpMessageFraming, HttpMessageFraming>, HttpMessageFraming, HttpMessageFraming> context_;
+    std::shared_ptr<NetworkSession<HttpMessageFraming, HttpMessageFraming>> session_;
+};
+
+inline HttpClient::HttpClient(asio::io_context& io_context, const std::string& cert_file , bool allow_self_signed)
+        : ssl_context_(std::make_unique<asio::ssl::context>(asio::ssl::context::tls_client)),
+          io_context_(io_context),
+          allow_self_signed_(allow_self_signed)
+{
+    AsyncLogger& logger = AsyncLogger::getInstance();
+    logger.setLogLevel(AsyncLogger::parseLogLevel("ERROR"));
+    logger.addDestination(std::make_shared<AsyncLogger::ConsoleDestination>());
+    logger.addDestination(std::make_shared<AsyncLogger::FileDestination>("client.log", 1 * (1024 * 1024)));
+    SSL_load_error_strings();
+    OpenSSL_add_all_algorithms();
+
+    ssl_context_->set_options(
+        asio::ssl::context::default_workarounds |
+        asio::ssl::context::no_sslv2 |
+        asio::ssl::context::no_sslv3 |
+        asio::ssl::context::no_tlsv1 |
+        asio::ssl::context::no_tlsv1_1
+    );
+
+    ssl_context_->set_verify_mode(asio::ssl::verify_peer);
+
+    if (!cert_file.empty()) {
+        load_cert_file(cert_file);
+    } else {
+        load_default_cert_file();
+    }
+
+    ssl_context_->set_verify_callback(
+        [this](bool preverified, asio::ssl::verify_context& ctx) {
+            return verify_certificate(preverified, ctx);
+        });
+}
+
+
+inline std::future<HttpResponse> HttpClient::get(const std::string& url, const std::unordered_map<std::string, std::string>& headers) {
+    HttpRequest request;
+    request.setMethod("GET");
+
+    std::string host, port, path;
+    parseUrl(url, host, port, path);
+
+    request.setPath(path);
+    request.setHttpVersion("HTTP/1.1");
+    request.header().addField("Host", host);
+
+    for (const auto& [key, value] : headers) {
+        request.header().addField(key, value);
+    }
+
+    return sendRequest(url, request);
+}
+
+inline std::future<HttpResponse> HttpClient::post(const std::string& url, const std::string& body, const std::unordered_map<std::string, std::string>& headers) {
+    HttpRequest request;
+    request.setMethod("POST");
+
+    std::string host, port, path;
+    parseUrl(url, host, port, path);
+
+    request.setPath(path);
+    request.setHttpVersion("HTTP/1.1");
+    request.header().addField("Host", host);
+    request.header().addField("Content-Length", std::to_string(body.length()));
+    request.body().setContent(body);
+
+    for (const auto& [key, value] : headers) {
+        request.header().addField(key, value);
+    }
+
+    return sendRequest(url, request);
+}
+
+inline void HttpClient::load_cert_file(const std::string &file_path) const
+{
+    std::error_code ec;
+    ssl_context_->load_verify_file(file_path, ec);
+    if (ec) {
+        LOG_ERROR("Failed to load certificate file: %s. Error: %s", file_path.c_str(), ec.message().c_str());
+        throw std::runtime_error("Failed to load certificate file");
+    }
+}
+
+inline void HttpClient::load_default_cert_file()
+{
+#ifdef _WIN32
+    load_windows_cert_store();
+#else
+        load_unix_cert_file();
+#endif
+}
+
+#ifdef _WIN32
+inline void HttpClient::load_windows_cert_store() const
+{
+    HCERTSTORE hStore = CertOpenSystemStore(0, "ROOT");
+    if (!hStore) {
+        LOG_ERROR("Failed to open Windows certificate store");
+        throw std::runtime_error("Failed to open Windows certificate store");
+    }
+
+    X509_STORE* store = SSL_CTX_get_cert_store(ssl_context_->native_handle());
+
+    PCCERT_CONTEXT pContext = nullptr;
+    while ((pContext = CertEnumCertificatesInStore(hStore, pContext)) != nullptr) {
+        X509* x509 = d2i_X509(nullptr,
+                              (const unsigned char**)&pContext->pbCertEncoded,
+                              pContext->cbCertEncoded);
+        if (x509) {
+            X509_STORE_add_cert(store, x509);
+            X509_free(x509);
+        }
+    }
+
+    CertCloseStore(hStore, 0);
+    LOG_INFO("Successfully loaded certificates from Windows certificate store");
+}
+
+inline bool HttpClient::verify_certificate(bool preverified, asio::ssl::verify_context &ctx) const
+{
+    X509* cert = X509_STORE_CTX_get_current_cert(ctx.native_handle());
+    if (!cert) {
+        LOG_ERROR("No certificate found in verify context");
+        return false;
+    }
+
+    char subject_name[256];
+    X509_NAME_oneline(X509_get_subject_name(cert), subject_name, sizeof(subject_name));
+    LOG_INFO("Verifying certificate: %s", subject_name);
+
+    if (!preverified) {
+        int err = X509_STORE_CTX_get_error(ctx.native_handle());
+        LOG_ERROR("Certificate verification failed: %s", X509_verify_cert_error_string(err));
+
+        if (allow_self_signed_ && err == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT) {
+            LOG_WARNING("Allowing self-signed certificate");
+            return true;
+        }
+    }
+
+    return preverified;
+}
+#else
+void load_unix_cert_file() {
+    const std::vector<std::string> default_cert_paths = {
+        "/etc/ssl/certs/ca-certificates.crt",  // Debian/Ubuntu/Gentoo etc.
+        "/etc/pki/tls/certs/ca-bundle.crt",    // Fedora/RHEL 6
+        "/etc/ssl/ca-bundle.pem",              // OpenSUSE
+        "/etc/pki/tls/cacert.pem",             // OpenELEC
+        "/etc/ssl/cert.pem",                   // MacOS
+    };
+
+    for (const auto& path : default_cert_paths) {
+        std::error_code ec;
+        ssl_context_->load_verify_file(path, ec);
+        if (!ec) {
+            LOG_INFO("Successfully loaded certificates from: %s", path.c_str());
+            return;
+        }
+    }
+
+    LOG_ERROR("Failed to load any default certificate files");
+    throw std::runtime_error("No valid certificate file found");
+}
+#endif
+
+inline std::future<HttpResponse> HttpClient::sendRequest(const std::string& url, HttpRequest& request) {
+    auto promise = std::make_shared<std::promise<HttpResponse>>();
+    auto future = promise->get_future();
+
+    std::string host, port, path;
+    parseUrl(url, host, port, path);
+
+    bool is_https = (port == "443");
+
+    context_.set_message_framing_sender(message_framing_);
+    context_.set_message_framing_receiver(message_framing_);
+
+    context_.set_connected_callback([request](const std::shared_ptr<NetworkSession<HttpMessageFraming, HttpMessageFraming>>& session) {
+        std::string request_string = request.toString();
+        session->write(ByteVector(request_string.begin(), request_string.end()));
+    });
+
+    context_.set_message_handler([promise](const std::shared_ptr<NetworkSession<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
+        const HttpResponse response = HttpParser::parseResponse(data);
+        promise->set_value(response);
+        session->close();
+    });
+
+    session_ = NetworkSession<HttpMessageFraming, HttpMessageFraming>::connect(
+        io_context_,
+        host,
+        port,
+        context_,
+        is_https ? ssl_context_.get() : nullptr
+    );
+
+    return future;
+}
+
+inline void HttpClient::parseUrl(const std::string& url, std::string& host, std::string& port, std::string& path) {
+    std::regex url_regex("(https?)://([^:/]+)(:([0-9]+))?(/.*)?");
+    std::smatch matches;
+
+    if (std::regex_match(url, matches, url_regex)) {
+        std::string protocol = matches[1].str();
+        host = matches[2].str();
+        port = matches[4].str();
+        path = matches[5].str();
+
+        if (port.empty()) {
+            port = (protocol == "https") ? "443" : "80";
+        }
+
+        if (path.empty()) {
+            path = "/";
+        }
+    } else {
+        throw std::runtime_error("Invalid URL format");
+    }
+}
+</file>
+
+<file path="networking_suite\include\HttpHeader.h" lines="45" modified="2024-09-10 14:20:41">
+//
+// Created by maxim on 10.09.2024.
+//
+
+// HttpHeader.h
+#pragma once
+#include <unordered_map>
+#include <string>
+#include <sstream>
+#include <algorithm>
+
+class HttpHeader {
+public:
+    void addField(const std::string& name, const std::string& value) {
+        fields_[name] = value;
+    }
+
+    std::string getField(const std::string& name) const {
+        auto it = fields_.find(name);
+        return (it != fields_.end()) ? it->second : "";
+    }
+
+    bool hasField(const std::string& name) const {
+        return fields_.find(name) != fields_.end();
+    }
+
+    void removeField(const std::string& name) {
+        fields_.erase(name);
+    }
+
+    std::string toString() const {
+        std::ostringstream oss;
+        for (const auto& [name, value] : fields_) {
+            oss << name << ": " << value << "\r\n";
+        }
+        return oss.str();
+    }
+
+private:
+    std::unordered_map<std::string, std::string> fields_;
+};
+</file>
+
+<file path="networking_suite\include\HttpMessage.h" lines="49" modified="2024-09-10 14:20:41">
+//
+// Created by maxim on 10.09.2024.
+//
+
+// HttpMessage.h
+#pragma once
+#include "HttpHeader.h"
+#include "HttpBody.h"
+#include <string>
+
+class HttpMessage {
+public:
+    enum class Type { REQUEST, RESPONSE };
+
+    HttpMessage(Type type) : type_(type) {}
+
+    void setType(Type type) {
+        type_ = type;
+    }
+
+    Type getType() const {
+        return type_;
+    }
+
+    HttpHeader& header() {
+        return header_;
+    }
+
+    const HttpHeader& header() const {
+        return header_;
+    }
+
+    HttpBody& body() {
+        return body_;
+    }
+
+    const HttpBody& body() const {
+        return body_;
+    }
+
+    virtual std::string toString() const = 0;
+
+protected:
+    Type type_;
+    HttpHeader header_;
+    HttpBody body_;
+};
+</file>
+
+<file path="networking_suite\include\HttpMessageFraming.h" lines="57" modified="2024-09-10 14:50:30">
+#pragma once
+
+#include <regex>
+#include <sstream>
+#include <unordered_map>
+#include <string>
+#include "SessionContext.h"
+#include "HttpParser.h"
+
+class HttpMessageFraming: MessageFraming {
+public:
+    enum class MessageType {
+        REQUEST,
+        RESPONSE,
+        UNKNOWN
+    };
+
+    HttpMessageFraming(): MessageFraming()
+    {
+    }
+
+    ByteVector frameMessage(const ByteVector& message) const override {
+        return message;
+    }
+
+    bool isCompleteMessage(const ByteVector& buffer) const override {
+        if(!HttpParser::isValidHttpMessage(buffer))
+        {
+           return false;
+        }
+        std::string bufferStr(buffer.begin(), buffer.end());
+        std::istringstream bufferStream(bufferStr);
+
+        std::string line;
+        int contentLength = 0;
+        int headerLength = 0;
+
+        std::getline(bufferStream, line);
+        headerLength += line.length() + 1;
+
+        while (std::getline(bufferStream, line) && line != "\r") {
+            headerLength += line.length() + 1;
+            if (line.find("Content-Length:") == 0) {
+                contentLength = std::stoi(line.substr(16));
+            }
+        }
+        headerLength += 2;
+
+        return (buffer.size() >= headerLength + contentLength);
+    }
+
+    ByteVector extractMessage(const ByteVector& buffer) override {
+        return buffer;
+    }
+
+
+};
+</file>
+
+<file path="networking_suite\include\HttpParser.h" lines="146" modified="2024-09-10 14:33:20">
+//
+// Created by maxim on 10.09.2024.
+//
+
+// HttpParser.h
+#pragma once
+#include "HttpRequest.h"
+#include "HttpResponse.h"
+#include <vector>
+#include <string>
+#include <optional>
+#include <stdexcept>
+#include <algorithm>
+
+class HttpParser {
+public:
+    enum class MessageType {
+        REQUEST,
+        RESPONSE,
+        UNKNOWN
+    };
+
+    static bool isValidHttpMessage(const std::vector<uint8_t>& data) {
+        std::string str(data.begin(), data.end());
+        return str.find("\r\n\r\n") != std::string::npos;
+    }
+
+    static HttpRequest parseRequest(const std::vector<uint8_t>& data) {
+        if (!isValidHttpMessage(data)) {
+            return HttpRequest();
+        }
+
+        std::string str(data.begin(), data.end());
+        std::istringstream iss(str);
+        std::string line;
+
+        HttpRequest request;
+
+        // Parse request line
+        if (!std::getline(iss, line)) {
+            return HttpRequest();
+        }
+        line.erase(line.find_last_not_of("\r\n") + 1);
+
+        std::istringstream request_line(line);
+        std::string method, path, version;
+        if (!(request_line >> method >> path >> version)) {
+            return HttpRequest();
+        }
+
+        request.setMethod(method);
+        request.setPath(path);
+        request.setHttpVersion(version);
+
+        // Parse headers
+        while (std::getline(iss, line) && line != "\r") {
+            line.erase(line.find_last_not_of("\r\n") + 1);
+            auto colon_pos = line.find(':');
+            if (colon_pos != std::string::npos) {
+                std::string name = line.substr(0, colon_pos);
+                std::string value = line.substr(colon_pos + 1);
+                value.erase(0, value.find_first_not_of(" "));
+                request.header().addField(name, value);
+            }
+        }
+
+        // Parse body
+        std::string body;
+        std::getline(iss, body, '\0');
+        request.body().setContent(std::vector<uint8_t>(body.begin(), body.end()));
+
+        return request;
+    }
+
+    static HttpResponse parseResponse(const std::vector<uint8_t>& data) {
+        if (!isValidHttpMessage(data)) {
+            return HttpResponse();
+        }
+
+        std::string str(data.begin(), data.end());
+        std::istringstream iss(str);
+        std::string line;
+
+        HttpResponse response;
+
+        // Parse status line
+        if (!std::getline(iss, line)) {
+            return HttpResponse();
+        }
+        line.erase(line.find_last_not_of("\r\n") + 1);
+
+        std::istringstream status_line(line);
+        std::string version, status_code, status_message;
+        if (!(status_line >> version >> status_code)) {
+            return HttpResponse();
+        }
+        std::getline(status_line, status_message);
+        status_message.erase(0, status_message.find_first_not_of(" "));
+
+        response.setHttpVersion(version);
+        response.setStatusCode(std::stoi(status_code));
+        response.setStatusMessage(status_message);
+
+        // Parse headers
+        while (std::getline(iss, line) && line != "\r") {
+            line.erase(line.find_last_not_of("\r\n") + 1);
+            auto colon_pos = line.find(':');
+            if (colon_pos != std::string::npos) {
+                std::string name = line.substr(0, colon_pos);
+                std::string value = line.substr(colon_pos + 1);
+                value.erase(0, value.find_first_not_of(" "));
+                response.header().addField(name, value);
+            }
+        }
+
+        // Parse body
+        std::string body;
+        std::getline(iss, body, '\0');
+        response.body().setContent(std::vector<uint8_t>(body.begin(), body.end()));
+
+        return response;
+    }
+
+    static MessageType detectMessageType(const std::vector<uint8_t>& data) {
+        if (!isValidHttpMessage(data)) {
+            return MessageType::UNKNOWN;
+        }
+
+        std::string str(data.begin(), data.end());
+        std::istringstream iss(str);
+        std::string first_line;
+        std::getline(iss, first_line);
+
+        if (first_line.find("HTTP/") == 0) {
+            return MessageType::RESPONSE;
+        } else if (first_line.find("GET ") == 0 || first_line.find("POST ") == 0 ||
+                   first_line.find("PUT ") == 0 || first_line.find("DELETE ") == 0 ||
+                   first_line.find("HEAD ") == 0 || first_line.find("OPTIONS ") == 0) {
+            return MessageType::REQUEST;
+        }
+
+        return MessageType::UNKNOWN;
+    }
+
+
+};
+</file>
+
+<file path="networking_suite\include\HttpRequest.h" lines="116" modified="2024-09-10 19:36:28">
+//
+// Created by maxim on 10.09.2024.
+//
+// HttpRequest.h
+#pragma once
+#include "HttpMessage.h"
+#include <sstream>
+#include <regex>
+
+class HttpRequest : public HttpMessage {
+public:
+    HttpRequest() : HttpMessage(Type::REQUEST), httpVersion_("HTTP/1.1") {}
+
+    void setMethod(const std::string& method) {
+        method_ = method;
+    }
+
+    void setPath(const std::string& path) {
+        path_ = path;
+    }
+
+    void setHttpVersion(const std::string& version) {
+        httpVersion_ = version;
+    }
+
+    std::string getMethod() const {
+        return method_;
+    }
+
+    std::string getPath() const {
+        return path_;
+    }
+
+    std::string getHttpVersion() const {
+        return httpVersion_;
+    }
+
+    std::string toString() const override {
+        std::ostringstream oss;
+        oss << method_ << " " << path_ << " " << httpVersion_ << "\r\n";
+        oss << header().toString();
+        oss << "\r\n";
+        const auto& content = body().getContent();
+        oss.write(reinterpret_cast<const char*>(content.data()), content.size());
+        return oss.str();
+    }
+    std::unordered_map<std::string, std::string> parseQueryString() const {
+        std::unordered_map<std::string, std::string> query_params;
+        std::string path = path_;
+        size_t query_start = path.find('?');
+
+        if (query_start != std::string::npos) {
+            std::string query = path.substr(query_start + 1);
+            std::istringstream query_stream(query);
+            std::string pair;
+
+            while (std::getline(query_stream, pair, '&')) {
+                size_t eq_pos = pair.find('=');
+                if (eq_pos != std::string::npos) {
+                    std::string key = pair.substr(0, eq_pos);
+                    std::string value = pair.substr(eq_pos + 1);
+                    query_params[urlDecode(key)] = urlDecode(value);
+                }
+            }
+        }
+
+        return query_params;
+    }
+
+    std::unordered_map<std::string, std::string> extractRouteParams(const std::string& route_pattern) const {
+        std::unordered_map<std::string, std::string> route_params;
+        std::string full_path = path_;
+        std::string path = full_path;
+
+        size_t query_pos = full_path.find_last_of('?');
+        if (query_pos != std::string::npos) {
+            path = full_path.substr(0, query_pos);
+        }
+        std::regex pattern(route_pattern);
+        std::smatch matches;
+
+        if (std::regex_match(path, matches, pattern)) {
+            for (size_t i = 1; i < matches.size(); ++i) {
+                std::string param_name = "param" + std::to_string(i);
+                route_params[param_name] = urlDecode(matches[i].str());
+            }
+        }
+
+        return route_params;
+    }
+private:
+    static std::string urlDecode(const std::string& encoded) {
+        std::string result;
+        for (size_t i = 0; i < encoded.length(); ++i) {
+            if (encoded[i] == '%' && i + 2 < encoded.length()) {
+                int value;
+                std::istringstream is(encoded.substr(i + 1, 2));
+                if (is >> std::hex >> value) {
+                    result += static_cast<char>(value);
+                    i += 2;
+                } else {
+                    result += encoded[i];
+                }
+            } else if (encoded[i] == '+') {
+                result += ' ';
+            } else {
+                result += encoded[i];
+            }
+        }
+        return result;
+    }
+    std::string method_;
+    std::string path_;
+    std::string httpVersion_;
+};
+</file>
+
+<file path="networking_suite\include\HttpResponse.h" lines="52" modified="2024-09-10 14:29:05">
+//
+// Created by maxim on 10.09.2024.
+//
+
+// HttpResponse.h
+#pragma once
+#include "HttpMessage.h"
+#include <sstream>
+
+class HttpResponse : public HttpMessage {
+public:
+    HttpResponse() : HttpMessage(Type::RESPONSE), statusCode_(200), statusMessage_("OK"), httpVersion_("HTTP/1.1") {}
+
+    void setStatusCode(int code) {
+        statusCode_ = code;
+    }
+
+    void setStatusMessage(const std::string& message) {
+        statusMessage_ = message;
+    }
+
+    void setHttpVersion(const std::string& version) {
+        httpVersion_ = version;
+    }
+
+    int getStatusCode() const {
+        return statusCode_;
+    }
+
+    std::string getStatusMessage() const {
+        return statusMessage_;
+    }
+
+    std::string getHttpVersion() const {
+        return httpVersion_;
+    }
+
+    std::string toString() const override {
+        std::ostringstream oss;
+        oss << httpVersion_ << " " << statusCode_ << " " << statusMessage_ << "\r\n";
+        oss << header().toString();
+        oss << "\r\n";
+        const auto& content = body().getContent();
+        oss.write(reinterpret_cast<const char*>(content.data()), content.size());
+        return oss.str();
+    }
+
+private:
+    int statusCode_;
+    std::string statusMessage_;
+    std::string httpVersion_;
+};
+</file>
+
+<file path="networking_suite\include\HttpServer.h" lines="176" modified="2024-09-11 23:19:25">
+//
+// Created by maxim on 08.09.2024.
+//
+
+#pragma once
+
+#include "Server.h"
+#include "HttpMessageFraming.h"
+#include "Config.h"
+#include "FileServer.h"
+#include <unordered_map>
+#include <functional>
+#include <regex>
+
+struct RouteContext {
+    std::string pattern;
+    std::regex regex;
+};
+
+class HttpServer {
+public:
+
+    using RequestHandler = std::function<void(RouteContext route_context, const HttpRequest& request, HttpResponse& response)>;
+    explicit HttpServer(const std::string& config_file)
+        : config_(std::make_shared<Config>()), message_framing_(), ssl_message_framing_()
+    {
+        config_->load(config_file);
+
+        unsigned int thread_count = config_->get<unsigned int>("thread_count", 4);
+        thread_pool_ = std::make_shared<AsioThreadPool>(thread_count);
+        server_ = std::make_unique<Server>(thread_pool_, *config_);
+
+        setupHTTPServer();
+        setupHTTPSServer();
+
+        // Initialize FileServer with root directory from config
+        std::string root_dir = config_->get<std::string>("file_server_root", "./public");
+        file_server_ = std::make_unique<FileServer>(root_dir);
+    }
+
+    void start() {
+        server_->start();
+    }
+
+    void stop() {
+        server_->stop();
+    }
+
+    void addRoute(const std::string& path, const RequestHandler &handler) {
+        std::string pattern = path + "(\\?.*)?$";
+        routes_.push_back({path, std::regex(pattern), handler});
+    }
+
+private:
+    struct RouteInfo {
+        std::string pattern;
+        std::regex regex;
+        RequestHandler handler;
+    };
+
+
+
+    void setupHTTPServer() {
+        auto http_port = config_->get<unsigned short>("http_port", 80);
+        tcp_handler_.set_message_framing_sender(message_framing_);
+        tcp_handler_.set_message_framing_receiver(message_framing_2);
+        tcp_handler_.set_message_handler([this](const std::shared_ptr<NetworkSession<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
+            handleHTTPRequest(session, data);
+        });
+
+        server_->addTcpPort(http_port, tcp_handler_);
+    }
+
+    void setupHTTPSServer() {
+        auto https_port = config_->get<unsigned short>("https_port", 443);
+        auto ssl_cert = config_->get<std::string>("ssl_cert_file", "");
+        auto ssl_key = config_->get<std::string>("ssl_key_file", "");
+        auto ssl_dh_file = config_->get<std::string>("ssl_dh_file", "");
+
+        if (ssl_cert.empty() || ssl_key.empty()) {
+            std::cout << "SSL configuration is incomplete. HTTPS server will not be started." << std::endl;
+            return;
+        }
+        ssl_handler_.set_message_framing_sender(ssl_message_framing_);
+        ssl_handler_.set_message_framing_receiver(ssl_message_framing_2);
+        ssl_handler_.set_message_handler([this](const std::shared_ptr<NetworkSession<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
+            handleHTTPSRequest(session, data);
+        });
+
+        server_->addSslTcpPort(https_port, ssl_cert, ssl_key, ssl_dh_file, ssl_handler_);
+    }
+
+
+    void handleHTTPRequest(const std::shared_ptr<NetworkSession<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
+        processRequest(session, data);
+    }
+
+    void handleHTTPSRequest(const std::shared_ptr<NetworkSession<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
+        processRequest(session, data);
+    }
+
+    template<typename SessionType>
+    void processRequest(const std::shared_ptr<SessionType>& session, const ByteVector& data) {
+        auto request = HttpParser::parseRequest(data) ;
+        HttpResponse response;
+
+        std::string method = request.getMethod();
+        std::string full_path = request.getPath();
+        std::string http_version = request.getHttpVersion();
+
+        // Split the path and query string
+        std::string path = full_path;
+
+        size_t query_pos = full_path.find_last_of('?');
+        if (query_pos != std::string::npos) {
+            path = full_path.substr(0, query_pos);
+        }
+
+        HttpHeader headers = request.header();
+
+        std::string body;
+        if (static_cast<int>(data.size()) > 0) {
+            body = std::string(data.begin(), data.end());
+        }
+
+        bool route_handled = false;
+
+        // Check for matching routes
+        for (const auto& route : routes_) {
+            std::smatch matches;
+            if (std::regex_match(path, matches, route.regex)) {
+                route.handler(RouteContext{route.pattern, route.regex}, request, response);
+                route_handled = true;
+                break;
+            }
+        }
+
+        // If no route handled the request, try to serve a file
+        if (!route_handled) {
+            std::string content_type;
+            std::string content;
+            if(path == "/") {
+                if(file_server_->serveFile(path + "index.html", content, content_type)) {
+                    response.body().setContent(content);
+                    response.header().addField("Content-Type", content_type);
+                    response.header().addField("Content-Length", std::to_string(content.length()));
+                } else {
+                    response.setStatusCode(404);
+                    response.setStatusMessage("NOT FOUND");
+                }
+            } else if (file_server_->serveFile(path, content, content_type)) {
+                response.body().setContent(content);
+                response.header().addField("Content-Type", content_type);
+                response.header().addField("Content-Length", std::to_string(content.length()));
+            } else {
+                response.setStatusCode(404);
+                response.setStatusMessage("NOT FOUND");
+            }
+        }
+        std::string response_string = response.toString();
+        session->write(ByteVector(response_string.begin(), response_string.end()));
+        session->close();
+    }
+
+    SessionContext<NetworkSession<HttpMessageFraming, HttpMessageFraming>, HttpMessageFraming, HttpMessageFraming> tcp_handler_;
+    HttpMessageFraming message_framing_;
+    HttpMessageFraming message_framing_2;
+    SessionContext<NetworkSession<HttpMessageFraming, HttpMessageFraming>, HttpMessageFraming, HttpMessageFraming> ssl_handler_;
+    HttpMessageFraming ssl_message_framing_;
+    HttpMessageFraming ssl_message_framing_2;
+    std::shared_ptr<Config> config_;
+    std::shared_ptr<AsioThreadPool> thread_pool_;
+    std::unique_ptr<Server> server_;
+    std::vector<RouteInfo> routes_;
+    std::unique_ptr<FileServer> file_server_;
+};
+</file>
+
+<file path="networking_suite\include\Logger.h" lines="250" modified="2024-09-10 18:55:46">
+#pragma once
+
+#include <queue>
+#include <thread>
+#include <condition_variable>
+#include <utility>
+#include <vector>
+#include <unordered_map>
+#include <functional>
+#include <filesystem>
+#include <memory>
+#include <iostream>
+#include <fstream>
+
+class AsyncLogger {
+public:
+    enum class LogLevel {
+        DEBUG_LOG,
+        INFO_LOG,
+        WARNING_LOG,
+        ERROR_LOG,
+        FATAL_LOG
+    };
+
+    struct LogEntry {
+        LogLevel level;
+        std::string file;
+        int line;
+        std::string message;
+        std::chrono::system_clock::time_point timestamp;
+        std::unordered_map<std::string, std::string> context;
+    };
+
+    class LogDestination {
+    public:
+        virtual ~LogDestination() = default;
+        virtual void write(const LogEntry& entry) = 0;
+    };
+
+    class ConsoleDestination : public LogDestination {
+    public:
+        void write(const LogEntry& entry) override {
+            std::cout << formatLogEntry(entry) << std::endl;
+        }
+    };
+
+    class FileDestination : public LogDestination {
+    public:
+        FileDestination(std::string  filename, size_t maxFileSize)
+                : m_filename(std::move(filename)), m_maxFileSize(maxFileSize) {
+            openLogFile();
+        }
+
+        void write(const LogEntry& entry) override {
+            if (m_logFile.tellp() >= m_maxFileSize) {
+                rotateLogFile();
+            }
+            m_logFile << formatLogEntry(entry) << std::endl;
+        }
+
+    private:
+        void openLogFile() {
+            m_logFile.open(m_filename, std::ios::app);
+        }
+
+        void rotateLogFile() {
+            m_logFile.close();
+            std::filesystem::path logPath(m_filename);
+            std::string newName = logPath.stem().string() + "_" +
+                                  std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) +
+                                  logPath.extension().string();
+            std::filesystem::rename(m_filename, newName);
+            openLogFile();
+        }
+
+        std::string m_filename;
+        std::ofstream m_logFile;
+        size_t m_maxFileSize;
+    };
+
+    AsyncLogger() : m_logLevel(LogLevel::INFO_LOG), m_stopFlag(false) {
+        m_loggerThread = std::thread(&AsyncLogger::loggerThreadFunction, this);
+    }
+
+    AsyncLogger(const AsyncLogger&) = delete;
+    AsyncLogger& operator=(const AsyncLogger&) = delete;
+
+    ~AsyncLogger() {
+        {
+            std::lock_guard<std::mutex> lock(m_queueMutex);
+            m_stopFlag = true;
+        }
+        m_condition.notify_one();
+        if (m_loggerThread.joinable()) {
+            m_loggerThread.join();
+        }
+    }
+
+    static AsyncLogger& getInstance() {
+        static AsyncLogger instance;
+        return instance;
+    }
+
+    void setLogLevel(LogLevel level) {
+        m_logLevel = level;
+    }
+
+    static LogLevel parseLogLevel(const std::string& level) {
+        if (level == "DEBUG" || level == "debug") return LogLevel::DEBUG_LOG;
+        if (level == "INFO" || level == "info") return LogLevel::INFO_LOG;
+        if (level == "WARNING" || level == "warning") return LogLevel::WARNING_LOG;
+        if (level == "ERROR" || level == "error") return LogLevel::ERROR_LOG;
+        if (level == "FATAL" || level == "fatal") return LogLevel::FATAL_LOG;
+
+        // Default to INFO if the level string is not recognized
+        return LogLevel::INFO_LOG;
+    }
+
+    void addDestination(std::shared_ptr<LogDestination> destination) {
+        std::lock_guard<std::mutex> lock(m_destinationsMutex);
+        m_destinations.push_back(std::move(destination));
+    }
+
+    void setLogFilter(std::function<bool(const LogEntry&)> filter) {
+        m_logFilter = std::move(filter);
+    }
+
+    void setContextValue(const std::string& key, const std::string& value) {
+        std::lock_guard<std::mutex> lock(m_contextMutex);
+        m_context[key] = value;
+    }
+
+    template<typename... Args>
+    void log(LogLevel level, const char* file, int line, const char* format, Args... args) {
+        if (level >= m_logLevel) {
+            LogEntry entry{
+                    level,
+                    file,
+                    line,
+                    formatString(format, args...),
+                    std::chrono::system_clock::now(),
+                    {}
+            };
+
+            {
+                std::lock_guard<std::mutex> lock(m_contextMutex);
+                entry.context = m_context;
+            }
+
+            if (m_logFilter && !m_logFilter(entry)) {
+                return;
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(m_queueMutex);
+                m_logQueue.push(std::move(entry));
+            }
+            m_condition.notify_one();
+        }
+    }
+
+private:
+
+    void loggerThreadFunction()
+    {
+        while (true) {
+            std::unique_lock<std::mutex> lock(m_queueMutex);
+            m_condition.wait(lock, [this] { return !m_logQueue.empty() || m_stopFlag; });
+
+            if (m_stopFlag && m_logQueue.empty()) {
+                break;
+            }
+
+            LogEntry entry = std::move(m_logQueue.front());
+            m_logQueue.pop();
+            lock.unlock();
+
+            std::lock_guard<std::mutex> destLock(m_destinationsMutex);
+            for (const auto& dest : m_destinations) {
+                dest->write(entry);
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    }
+    static std::string formatLogEntry(const LogEntry& entry) {
+        std::ostringstream oss;
+        auto now = std::chrono::system_clock::now();
+        auto now_c = std::chrono::system_clock::to_time_t(now);
+
+        std::tm time_info{};
+#if defined(_WIN32)
+        localtime_s(&time_info, &now_c);
+#else
+        localtime_r(&now_c, &time_info);
+#endif
+        oss << std::put_time(&time_info, "%Y-%m-%d %H:%M:%S") << " ";
+        oss << "[" << getLevelString(entry.level) << "] ";
+        oss << "[" << entry.file << ":" << entry.line << "] ";
+        oss << entry.message;
+
+        if (!entry.context.empty()) {
+            oss << " {";
+            for (const auto& [key, value] : entry.context) {
+                oss << key << ": " << value << ", ";
+            }
+            oss.seekp(-2, std::ios_base::end);
+            oss << "}";
+        }
+
+        return oss.str();
+    }
+
+    static const char* getLevelString(LogLevel level) {
+        switch (level) {
+            case LogLevel::DEBUG_LOG: return "DEBUG";
+            case LogLevel::INFO_LOG: return "INFO";
+            case LogLevel::WARNING_LOG: return "WARNING";
+            case LogLevel::ERROR_LOG: return "ERROR";
+            case LogLevel::FATAL_LOG: return "FATAL";
+            default: return "UNKNOWN";
+        }
+    }
+
+    template<typename... Args>
+    static std::string formatString(const char* format, Args... args) {
+        int size = snprintf(nullptr, 0, format, args...);
+        std::string result(size + 1, '\0');
+        snprintf(&result[0], size + 1, format, args...);
+        return result;
+    }
+
+    LogLevel m_logLevel;
+    std::queue<LogEntry> m_logQueue;
+    std::thread m_loggerThread;
+    std::mutex m_queueMutex;
+    std::mutex m_destinationsMutex;
+    std::mutex m_contextMutex;
+    std::condition_variable m_condition;
+    bool m_stopFlag;
+    std::vector<std::shared_ptr<LogDestination>> m_destinations;
+    std::function<bool(const LogEntry&)> m_logFilter;
+    std::unordered_map<std::string, std::string> m_context;
+};
+
+// Macro definitions for easy logging
+#define LOG_DEBUG(format, ...) AsyncLogger::getInstance().log(AsyncLogger::LogLevel::DEBUG_LOG, __FILE__, __LINE__, format, ##__VA_ARGS__)
+#define LOG_INFO(format, ...) AsyncLogger::getInstance().log(AsyncLogger::LogLevel::INFO_LOG, __FILE__, __LINE__, format, ##__VA_ARGS__)
+#define LOG_WARNING(format, ...) AsyncLogger::getInstance().log(AsyncLogger::LogLevel::WARNING_LOG, __FILE__, __LINE__, format, ##__VA_ARGS__)
+#define LOG_ERROR(format, ...) AsyncLogger::getInstance().log(AsyncLogger::LogLevel::ERROR_LOG, __FILE__, __LINE__, format, ##__VA_ARGS__)
+#define LOG_FATAL(format, ...) AsyncLogger::getInstance().log(AsyncLogger::LogLevel::FATAL_LOG, __FILE__, __LINE__, format, ##__VA_ARGS__)
+</file>
+
+<file path="networking_suite\include\NetworkSession.h" lines="395" modified="2024-09-12 02:48:44">
+//
+// Created by maxim on 10.09.2024.
+//
+
+#pragma once
+
+#include <asio.hpp>
+#include <asio/ssl.hpp>
+#include <memory>
+#include <atomic>
+#include <type_traits>
+#include "BufferPool.h"
+#include "Logger.h"
+#include "SessionContext.h"
+#include "Utilities.h"
+
+template<typename SenderFramingType, typename ReceiverFramingType>
+class NetworkSession : public std::enable_shared_from_this<NetworkSession<SenderFramingType, ReceiverFramingType> >
+{
+public:
+    enum class SessionRole
+    {
+        SERVER,
+        CLIENT
+    };
+
+private:
+    asio::io_context &io_context_;
+    asio::ip::tcp::socket socket_;
+    SessionRole session_role_;
+    std::unique_ptr<asio::ssl::stream<asio::ip::tcp::socket &> > ssl_stream_;
+    std::string sessionUuid_;
+    asio::strand<asio::io_context::executor_type> strand_;
+    std::shared_ptr<BufferPool> buffer_pool_;
+    LockFreeQueue<ByteVector *, 1024> write_queue_;
+    std::atomic<bool> is_closed_{false};
+    ByteVector read_buffer_;
+    SessionContext<NetworkSession, SenderFramingType, ReceiverFramingType> connection_context_;
+    bool is_ssl_;
+    bool allow_self_signed_;
+    asio::steady_timer shutdown_timer_;
+
+
+public:
+    explicit NetworkSession(asio::io_context &io_context, asio::ip::tcp::socket socket,
+                            asio::ssl::context *ssl_context = nullptr)
+        : io_context_(io_context),
+          socket_(std::move(socket)), session_role_(SessionRole::SERVER),
+          sessionUuid_(Utilities::generateUuid()),
+          strand_(asio::make_strand(io_context)),
+          buffer_pool_(std::make_shared<BufferPool>(32728)),
+          is_ssl_(ssl_context != nullptr), allow_self_signed_(false), shutdown_timer_(io_context)
+    {
+        if (is_ssl_)
+        {
+            ssl_stream_ = std::make_unique<asio::ssl::stream<asio::ip::tcp::socket &> >(socket_, *ssl_context);
+        }
+        read_buffer_.reserve(buffer_pool_->getBufferSize());
+    }
+
+    explicit NetworkSession(asio::io_context &io_context, asio::ssl::context *ssl_context = nullptr)
+        : io_context_(io_context),
+          socket_(io_context), session_role_(SessionRole::SERVER),
+          sessionUuid_(Utilities::generateUuid()),
+          strand_(asio::make_strand(io_context)),
+          buffer_pool_(std::make_shared<BufferPool>(32728)),
+          is_ssl_(ssl_context != nullptr), allow_self_signed_(false), shutdown_timer_(io_context)
+    {
+        if (is_ssl_)
+        {
+            ssl_stream_ = std::make_unique<asio::ssl::stream<asio::ip::tcp::socket &> >(socket_, *ssl_context);
+        }
+        read_buffer_.reserve(buffer_pool_->getBufferSize());
+    }
+
+    void start(const SessionContext<NetworkSession, SenderFramingType, ReceiverFramingType> &context,
+               SessionRole session_role = SessionRole::SERVER,
+               const std::string &hostname = "",
+               bool allow_self_signed = false)
+    {
+        connection_context_ = context;
+        connection_context_.set_session(this->shared_from_this());
+        session_role_ = session_role;
+        allow_self_signed_ = allow_self_signed;
+        if (is_ssl_)
+        {
+            if (!hostname.empty())
+            {
+                if (!SSL_set_tlsext_host_name(ssl_stream_->native_handle(), hostname.c_str()))
+                {
+                    throw std::runtime_error("Failed to set SNI hostname");
+                }
+            }
+            do_ssl_handshake(hostname);
+        } else
+        {
+            connection_context_.on_connect();
+            do_read();
+        }
+    }
+
+    bool is_closed() const { return is_closed_.load(std::memory_order_acquire); }
+    asio::ip::tcp::socket &socket() { return socket_; }
+    std::string getSessionUuid() const { return sessionUuid_; }
+
+    void write(const ByteVector &message)
+    {
+        if (is_closed())
+        {
+            return;
+        }
+
+        ByteVector *buffer = buffer_pool_->acquire();
+        *buffer = connection_context_.preprocess_write(message);
+
+        asio::post(strand_, [this, buffer]()
+        {
+            write_queue_.push(buffer);
+            if (write_queue_.size() == 1)
+            {
+                do_write();
+            }
+        });
+    }
+
+    void close()
+    {
+        asio::post(strand_, [this, self = this->shared_from_this()]()
+        {
+            do_close();
+        });
+    }
+
+private:
+    void do_ssl_handshake(const std::string &hostname)
+    {
+        ssl_stream_->async_handshake(
+            session_role_ == SessionRole::SERVER ? asio::ssl::stream_base::server : asio::ssl::stream_base::client,
+            asio::bind_executor(strand_, [this, self = this->shared_from_this(), hostname](const asio::error_code &ec)
+            {
+                if (!ec)
+                {
+                    if (!hostname.empty())
+                    {
+                        if (!SSL_get_peer_certificate(ssl_stream_->native_handle()))
+                        {
+                            LOG_ERROR("No certificate was presented by the server");
+                            connection_context_.on_error(asio::error::no_recovery, "No server certificate");
+                            close();
+                            return;
+                        }
+                        long verify_result = SSL_get_verify_result(ssl_stream_->native_handle());
+                        if (verify_result != X509_V_OK)
+                        {
+                            if (!(allow_self_signed_ && verify_result == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT))
+                            {
+                                LOG_ERROR("Certificate verification failed: %s",
+                                          X509_verify_cert_error_string(verify_result));
+                                connection_context_.on_error(asio::error::no_recovery,
+                                                             "Certificate verification failed");
+                                close();
+                                return;
+                            } else
+                            {
+                                LOG_WARNING("Allowing self-signed certificate");
+                            }
+                        }
+                        // Perform hostname verification here if needed
+                    }
+                    connection_context_.on_connect();
+                    do_read();
+                } else
+                {
+                    LOG_ERROR("SSL handshake failed: %s", ec.message().c_str());
+                    char error_buffer[256];
+                    ERR_error_string_n(ERR_get_error(), error_buffer, sizeof(error_buffer));
+                    LOG_ERROR("OpenSSL Error: %s", error_buffer);
+                    connection_context_.on_error(ec, "SSL handshake failed");
+                    close();
+                }
+            }));
+    }
+
+    void do_read()
+    {
+        auto read_buffer = buffer_pool_->acquire();
+        auto buffer = asio::buffer(*read_buffer);
+
+        auto read_handler = [this, self = this->shared_from_this(), read_buffer](
+            const asio::error_code &ec, std::size_t bytes_transferred)
+        {
+            if (!ec)
+            {
+                read_buffer->resize(bytes_transferred);
+                process_read_data(*read_buffer);
+                do_read();
+            } else if (ec != asio::error::operation_aborted)
+            {
+                LOG_DEBUG("Error in read: %s", ec.message().c_str());
+                connection_context_.on_error(ec, "Read operation failed");
+                close();
+            }
+            buffer_pool_->release(read_buffer);
+        };
+
+        if (is_ssl_)
+        {
+            ssl_stream_->async_read_some(buffer, asio::bind_executor(strand_, read_handler));
+        } else
+        {
+            socket_.async_read_some(buffer, asio::bind_executor(strand_, read_handler));
+        }
+    }
+
+
+    void process_read_data(const ByteVector &new_data)
+    {
+        read_buffer_.insert(read_buffer_.end(), new_data.begin(), new_data.end());
+
+        while (true)
+        {
+            if (connection_context_.checkIfIsCompleteMessage(read_buffer_))
+            {
+                ByteVector message = connection_context_.postprocess_read(read_buffer_);
+                size_t message_size = read_buffer_.size();
+                read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + static_cast<int>(message_size));
+
+                connection_context_.on_message(message);
+            } else
+            {
+                break;
+            }
+        }
+
+        if (read_buffer_.size() > buffer_pool_->getBufferSize())
+        {
+            LOG_WARNING("Read buffer overflow, discarding old data");
+            read_buffer_.erase(read_buffer_.begin(),
+                               read_buffer_.end() - static_cast<int>(buffer_pool_->getBufferSize()));
+        }
+    }
+
+    void do_write()
+    {
+        if (is_closed())
+        {
+            return;
+        }
+
+        auto buffer = write_queue_.pop();
+        if (!buffer)
+        {
+            return;
+        }
+
+        auto write_handler = [this, self = this->shared_from_this(), buffer](
+            const asio::error_code &ec, std::size_t bytes_written)
+        {
+            buffer_pool_->release(*buffer);
+
+            if (!ec)
+            {
+                LOG_DEBUG("Wrote %zu bytes", bytes_written);
+                if (!write_queue_.empty())
+                {
+                    do_write();
+                }
+            } else if (ec != asio::error::operation_aborted)
+            {
+                LOG_DEBUG("Error in write: %s", ec.message().c_str());
+                connection_context_.on_error(ec, "Write operation failed");
+                close();
+            }
+        };
+
+        if (is_ssl_)
+        {
+            asio::async_write(*ssl_stream_, asio::buffer(**buffer), asio::bind_executor(strand_, write_handler));
+        } else
+        {
+            asio::async_write(socket_, asio::buffer(**buffer), asio::bind_executor(strand_, write_handler));
+        }
+    }
+
+
+    void do_close() {
+        if (is_closed_.exchange(true, std::memory_order_acq_rel)) {
+            return;
+        }
+
+        // Clear the write queue
+        while (auto opt_buffer = write_queue_.pop()) {
+            buffer_pool_->release(*opt_buffer);
+        }
+
+        if (!socket_.is_open()) {
+            connection_context_.on_close();
+            return;
+        }
+
+        asio::post(strand_, [this, self = this->shared_from_this()]() {
+            std::error_code ec;
+            socket_.cancel(ec);
+            if (ec) {
+                LOG_ERROR("Error cancelling pending operations: %s", ec.message().c_str());
+                connection_context_.on_error(ec, "Error cancelling pending operations");
+            }
+
+            if (is_ssl_) {
+                initiate_ssl_shutdown();
+            } else {
+                finish_close();
+            }
+        });
+    }
+
+    void initiate_ssl_shutdown() {
+        ssl_stream_->async_shutdown(
+            asio::bind_executor(strand_, [this, self = this->shared_from_this()](const asio::error_code& shutdown_ec) {
+                handle_ssl_shutdown(shutdown_ec);
+            })
+        );
+
+    }
+
+    void handle_ssl_shutdown(const asio::error_code& shutdown_ec) {
+        if (shutdown_ec) {
+            // Check for common, expected SSL shutdown errors
+            if (shutdown_ec == asio::error::eof ||
+                shutdown_ec == asio::ssl::error::stream_truncated ||
+                ERR_GET_REASON(shutdown_ec.value()) == SSL_R_PROTOCOL_IS_SHUTDOWN) {
+                LOG_INFO("SSL shutdown completed with expected condition: %s", shutdown_ec.message().c_str());
+                } else {
+                    LOG_WARNING("Non-critical error during SSL shutdown: %s", shutdown_ec.message().c_str());
+                }
+        } else {
+            LOG_INFO("SSL shutdown completed successfully");
+        }
+
+        // Proceed with closing the socket regardless of SSL shutdown result
+        finish_close();
+    }
+
+    void finish_close() {
+        if (!socket_.is_open()) {
+            connection_context_.on_close();
+            return;
+        }
+        std::error_code ec;
+        socket_.shutdown(asio::ip::tcp::socket::shutdown_both, ec);
+        if (ec && ec != asio::error::not_connected) {
+            LOG_ERROR("Error shutting down socket: %s", ec.message().c_str());
+            connection_context_.on_error(ec, "Error shutting down socket");
+        }
+
+        socket_.close(ec);
+        if (ec) {
+            LOG_ERROR("Error closing socket: %s", ec.message().c_str());
+            connection_context_.on_error(ec, "Error closing socket");
+        }
+
+        connection_context_.on_close();
+    }
+
+public:
+    static std::shared_ptr<NetworkSession> connect(
+        asio::io_context &io_context,
+        const std::string &host,
+        const std::string &port,
+        const SessionContext<NetworkSession, SenderFramingType, ReceiverFramingType> &connection_context,
+        asio::ssl::context *ssl_context = nullptr)
+    {
+        auto session = std::make_shared<NetworkSession>(io_context, ssl_context);
+
+        asio::ip::tcp::resolver resolver(io_context);
+        auto endpoints = resolver.resolve(host, port);
+
+        asio::async_connect(session->socket(), endpoints,
+                            [session, connection_context, host](const std::error_code &ec,
+                                                                const asio::ip::tcp::endpoint &)
+                            {
+                                if (!ec)
+                                {
+                                    session->socket().set_option(asio::ip::tcp::no_delay(true));
+                                    session->start(connection_context, SessionRole::CLIENT, host, true);
+                                } else
+                                {
+                                    LOG_ERROR("Connection failed: %s", ec.message().c_str());
+                                    session->connection_context_.on_error(ec, "Connection failed");
+                                }
+                            });
+
+        return session;
+    }
+};
+</file>
+
+<file path="networking_suite\include\Port.h" lines="153" modified="2024-09-11 23:56:35">
+//
+// Created by maxim on 07.09.2024.
+//
+
+#pragma once
+
+#include <asio.hpp>
+#include <asio/ssl.hpp>
+#include <memory>
+#include <NetworkSession.h>
+#include <shared_mutex>
+#include <UDPNetworkUtility.h>
+#include <utility>
+
+#include "SessionContext.h"
+
+
+class Port
+{
+public:
+    enum class Protocol { TCP, UDP };
+
+    Port(asio::io_context &io_context, unsigned short port_number, Protocol protocol)
+        : io_context_(io_context), port_number_(port_number), protocol_(protocol)
+    {
+    }
+
+    virtual ~Port() = default;
+
+    virtual void start() = 0;
+
+    virtual void stop() = 0;
+
+    [[nodiscard]] unsigned short getPortNumber() const { return port_number_; }
+    [[nodiscard]] Protocol getProtocol() const { return protocol_; }
+
+protected:
+    asio::io_context &io_context_;
+    unsigned short port_number_;
+    Protocol protocol_;
+
+};
+
+
+
+template< typename SenderFramingType, typename ReceiverFramingType>
+class TcpPort : public Port
+{
+public:
+    TcpPort(asio::io_context &io_context, unsigned short port_number, SessionContext<NetworkSession<SenderFramingType, ReceiverFramingType>,SenderFramingType, ReceiverFramingType>& connection_context, asio::ssl::context* ssl_context = nullptr)
+        : Port(io_context, port_number, Protocol::TCP), connection_context_(connection_context),
+          acceptor_(io_context, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port_number)), ssl_context_(ssl_context)
+    {
+    }
+
+    void start() override
+    {
+        do_accept();
+    }
+
+    void stop() override
+    {
+        acceptor_.close();
+    }
+
+
+private:
+    void do_accept()
+    {
+        acceptor_.async_accept(
+            [this](std::error_code ec, asio::ip::tcp::socket socket)
+            {
+                if (!ec)
+                {
+                    auto session = std::make_shared<NetworkSession<SenderFramingType, ReceiverFramingType>>(io_context_, std::move(socket), ssl_context_);
+                    session->start(connection_context_);
+
+                    {
+                        std::lock_guard lock(user_mutex);
+                        connected_users_[session->getSessionUuid()] = session;
+                    }
+                    connection_context_.on_connect();
+                }
+                do_accept();
+            });
+    }
+    asio::ssl::context* ssl_context_;
+    asio::ip::tcp::acceptor acceptor_;
+    SessionContext<NetworkSession<SenderFramingType, ReceiverFramingType>, SenderFramingType, ReceiverFramingType>& connection_context_;
+    std::mutex user_mutex;
+    std::unordered_map<std::string, std::shared_ptr<NetworkSession<SenderFramingType, ReceiverFramingType>>> connected_users_;
+};
+template< typename SenderFramingType, typename ReceiverFramingType>
+class UdpPort : public Port
+{
+public:
+    UdpPort(asio::io_context &io_context, unsigned short port_number, SessionContext<UDPNetworkUtility::Session<SenderFramingType, ReceiverFramingType>,SenderFramingType, ReceiverFramingType >& connection_context)
+        : Port(io_context, port_number, Protocol::UDP),
+          socket_(io_context, asio::ip::udp::endpoint(asio::ip::udp::v4(), port_number)),
+            connection_context_(connection_context)
+    {
+    }
+
+    void start() override
+    {
+        do_receive();
+    }
+
+    void stop() override
+    {
+        socket_.close();
+    }
+
+
+private:
+    void do_receive()
+    {
+        auto receive_buffer = std::make_shared<ByteVector>(buffer_size);
+        socket_.async_receive_from(
+            asio::buffer(*receive_buffer),
+            sender_endpoint_,
+            [this, receive_buffer](std::error_code ec, std::size_t bytes_recvd)
+            {
+                if (!ec)
+                {
+                    receive_buffer->resize(bytes_recvd);
+                    if (connection_context_.checkIfIsCompleteMessage(*receive_buffer))
+                    {
+                        auto message = connection_context_.postprocess_read(*receive_buffer);
+                        auto connection = std::make_shared<UDPNetworkUtility::Session<SenderFramingType, ReceiverFramingType>>(io_context_);
+                            connection->socket() = std::move(socket_);
+                            connection->endpoint = sender_endpoint_;
+                            connection->start(connection_context_);
+                            {
+                                std::lock_guard lock(user_mutex);
+                                connected_users_[connection->getConnectionUuid()] = connection;
+                            }
+                            connection_context_.on_connect();
+
+                            connection_context_.on_message(message);
+                    }
+                }
+                do_receive();
+            });
+    }
+
+    std::mutex user_mutex;
+    asio::ip::udp::socket socket_;
+    asio::ip::udp::endpoint sender_endpoint_;
+    SessionContext<UDPNetworkUtility::Session<SenderFramingType, ReceiverFramingType>,SenderFramingType, ReceiverFramingType>& connection_context_;
+    std::unordered_map<std::string, std::shared_ptr<UDPNetworkUtility::Session<SenderFramingType, ReceiverFramingType>> > connected_users_;
+    static constexpr std::size_t buffer_size = 8192;
+};
+</file>
+
+<file path="networking_suite\include\Server.h" lines="76" modified="2024-09-11 23:33:09">
+//
+// Created by maxim on 07.09.2024.
+//
+
+#pragma once
+
+#include <utility>
+#include <vector>
+#include <memory>
+#include "AsioThreadPool.h"
+#include "Config.h"
+#include "Port.h"
+
+
+class Server {
+public:
+    Server(std::shared_ptr<AsioThreadPool> thread_pool, Config  config)
+        : thread_pool_(std::move(thread_pool)), config_(std::move(config))
+    {
+        //auto port = config_.get<short>("port", 8080);
+        std::string defaultLevel = "INFO";
+        auto log_level = config_.get<std::string>("log_level", "INFO");
+        auto log_file = config_.get<std::string>("log_file", "client.log");
+        auto log_file_size_in_mb = config_.get<float>("max_log_file_size_in_mb", 1.0f);
+        AsyncLogger& logger = AsyncLogger::getInstance();
+        logger.setLogLevel(AsyncLogger::parseLogLevel(log_level));
+        logger.addDestination(std::make_shared<AsyncLogger::ConsoleDestination>());
+        logger.addDestination(std::make_shared<AsyncLogger::FileDestination>(log_file, log_file_size_in_mb * (1024 * 1024)));
+    }
+    template< typename SenderFramingType, typename ReceiverFramingType>
+    void addTcpPort(unsigned short port_number, SessionContext<NetworkSession<SenderFramingType, ReceiverFramingType>, SenderFramingType, ReceiverFramingType> &connection_context) {
+        auto tcp_port = std::make_shared<TcpPort<SenderFramingType, ReceiverFramingType>>(thread_pool_->get_io_context(), port_number, connection_context);
+        ports_.push_back(tcp_port);
+    }
+
+    template< typename SenderFramingType, typename ReceiverFramingType>
+    void addSslTcpPort(unsigned short port_number, const std::string& ssl_cert_file, const std::string& ssl_key_file, const std::string& ssl_dh_file, SessionContext<NetworkSession<SenderFramingType, ReceiverFramingType>, SenderFramingType, ReceiverFramingType>& connection_context) {
+        ssl_contexts_.emplace_back(std::make_shared<asio::ssl::context>(asio::ssl::context::sslv23));
+        ssl_contexts_.back()->set_options(
+                          asio::ssl::context::default_workarounds
+                          | asio::ssl::context::no_sslv2
+                          | asio::ssl::context::single_dh_use);
+        ssl_contexts_.back()->use_certificate_chain_file(ssl_cert_file);
+        ssl_contexts_.back()->use_private_key_file(ssl_key_file, asio::ssl::context::pem);
+        ssl_contexts_.back()->use_tmp_dh_file(ssl_dh_file);
+        auto tcp_port = std::make_shared<TcpPort<SenderFramingType, ReceiverFramingType>>(thread_pool_->get_io_context(), port_number, connection_context, ssl_contexts_.back().get());
+        ports_.push_back(tcp_port);
+    }
+
+    template< typename SenderFramingType, typename ReceiverFramingType>
+    void addUdpPort(unsigned short port_number, SessionContext<UDPNetworkUtility::Session<SenderFramingType, ReceiverFramingType>, SenderFramingType, ReceiverFramingType>& connection_context) {
+        auto udp_port = std::make_shared<UdpPort<SenderFramingType, ReceiverFramingType>>(thread_pool_->get_io_context(), port_number,connection_context);
+        ports_.push_back(udp_port);
+    }
+
+    void start() {
+        for (auto& port : ports_) {
+            port->start();
+        }
+        thread_pool_->start_threads();
+    }
+
+    void stop() {
+        for (auto& port : ports_) {
+            port->stop();
+        }
+        thread_pool_->stop();
+    }
+
+private:
+
+    std::vector<std::shared_ptr<asio::ssl::context>> ssl_contexts_;
+    std::shared_ptr<AsioThreadPool> thread_pool_;
+    std::vector<std::shared_ptr<Port>> ports_;
+    Config config_;
+};
+</file>
+
+<file path="networking_suite\include\SessionContext.h" lines="227" modified="2024-09-12 00:55:16">
+//
+// Created by maxim on 09.09.2024.
+//
+#pragma once
+
+using ByteVector = std::vector<uint8_t>;
+
+class MessageFraming
+{
+public:
+    virtual ~MessageFraming() = default;
+    [[nodiscard]] virtual ByteVector frameMessage(const ByteVector& message) const = 0;
+    [[nodiscard]] virtual bool isCompleteMessage(const ByteVector& buffer) const = 0;
+    virtual ByteVector extractMessage(const ByteVector& buffer) = 0;
+};
+
+
+template<typename SessionType, typename SenderFramingType, typename ReceiverFramingType>
+class SessionContext
+{
+public:
+    using ConnectedCallback = std::function<void(const std::shared_ptr<SessionType> &port)>;
+    using ClosedCallback = std::function<void(const std::shared_ptr<SessionType> &port)>;
+    using MessageHandler = std::function<void(const std::shared_ptr<SessionType> &port, const ByteVector &)>;
+    using PreProcessor = std::function<ByteVector(const ByteVector &)>;
+    using PostProcessor = std::function<ByteVector(const ByteVector &)>;
+    using IsCompleteMessageCheck= std::function<bool(const ByteVector&)>;
+    using ErrorHandler = std::function<void(const std::shared_ptr<SessionType> &port, const std::error_code &ec, const std::string &what)>;
+
+    SessionContext() = default;
+    ~SessionContext() = default;
+
+    SessionContext(const SessionContext &other)
+        : session_(other.session_),
+          connected_callback_(other.connected_callback_),
+          closed_callback_(other.closed_callback_),
+          message_handler_(other.message_handler_),
+          send_framing_(other.send_framing_),
+          receive_framing_(other.receive_framing_),
+          write_preprocessor_(other.write_preprocessor_),
+          read_postprocessor_(other.read_postprocessor_),
+          error_handler_(other.error_handler_),
+          is_complete_message_check_(other.is_complete_message_check_)
+    {
+    }
+
+    SessionContext(SessionContext &&other) noexcept
+        : session_(std::move(other.session_)),
+          connected_callback_(std::move(other.connected_callback_)),
+          closed_callback_(std::move(other.closed_callback_)),
+          message_handler_(std::move(other.message_handler_)),
+          send_framing_(std::move(other.send_framing_)),
+          receive_framing_(std::move(other.receive_framing_)),
+          write_preprocessor_(std::move(other.write_preprocessor_)),
+          read_postprocessor_(std::move(other.read_postprocessor_)),
+          error_handler_(std::move(other.error_handler_)),
+          is_complete_message_check_(std::move(other.is_complete_message_check_))
+    {
+    }
+
+    SessionContext & operator=(const SessionContext &other)
+    {
+        if (this == &other)
+            return *this;
+        session_ = other.session_;
+        connected_callback_ = other.connected_callback_;
+        closed_callback_ = other.closed_callback_;
+        message_handler_ = other.message_handler_;
+        send_framing_ = other.send_framing_;
+        receive_framing_ = other.receive_framing_;
+        write_preprocessor_ = other.write_preprocessor_;
+        read_postprocessor_ = other.read_postprocessor_;
+        error_handler_ = other.error_handler_;
+        is_complete_message_check_ = other.is_complete_message_check_;
+        return *this;
+    }
+
+    SessionContext & operator=(SessionContext &&other) noexcept
+    {
+        if (this == &other)
+            return *this;
+        session_ = std::move(other.session_);
+        connected_callback_ = std::move(other.connected_callback_);
+        closed_callback_ = std::move(other.closed_callback_);
+        message_handler_ = std::move(other.message_handler_);
+        send_framing_ = std::move(other.send_framing_);
+        receive_framing_ = std::move(other.receive_framing_);
+        write_preprocessor_ = std::move(other.write_preprocessor_);
+        read_postprocessor_ = std::move(other.read_postprocessor_);
+        error_handler_ = std::move(other.error_handler_);
+        is_complete_message_check_ = std::move(other.is_complete_message_check_);
+        return *this;
+    }
+
+    void set_connected_callback(ConnectedCallback callback)
+    {
+        connected_callback_ = std::move(callback);
+    }
+
+    void set_closed_callback(ClosedCallback callback)
+    {
+        closed_callback_ = std::move(callback);
+    }
+
+    void set_message_handler(MessageHandler handler)
+    {
+        message_handler_ = std::move(handler);
+    }
+
+    SenderFramingType& get_message_framing_send()
+    {
+        return send_framing_;
+    }
+
+    ReceiverFramingType& get_message_framing_receive()
+    {
+        return receive_framing_;
+    }
+
+
+    void set_message_framing_sender(SenderFramingType send_framing)
+    {
+        send_framing_ = std::move(send_framing);
+        set_write_preprocessor([this](const ByteVector& msg) {
+            return this->send_framing_.frameMessage(msg);
+        });
+    }
+
+    void set_message_framing_receiver(ReceiverFramingType receive_framing)
+    {
+        receive_framing_ = std::move(receive_framing);
+        set_read_postprocessor([this](const ByteVector& msg) {
+            return this->receive_framing_.extractMessage(msg);
+        });
+        set_is_complete_message_check([this](const ByteVector& msg) {
+            return this->receive_framing_.isCompleteMessage(msg);
+        });
+    }
+
+    void on_connect()
+    {
+        if (connected_callback_)
+        {
+            connected_callback_(session_);
+        }
+    }
+
+    void on_close()
+    {
+        if (closed_callback_)
+        {
+            closed_callback_(session_);
+        }
+    }
+
+    void on_message(const ByteVector &data)
+    {
+        if (message_handler_)
+        {
+            message_handler_(session_, data);
+        }
+    }
+
+    [[nodiscard]] ByteVector preprocess_write(const ByteVector &data) const
+    {
+        return write_preprocessor_ ? write_preprocessor_(data) : data;
+    }
+
+    [[nodiscard]] ByteVector postprocess_read(const ByteVector &data) const
+    {
+        return read_postprocessor_ ? read_postprocessor_(data) : data;
+    }
+
+    [[nodiscard]] bool checkIfIsCompleteMessage(const ByteVector &data) const
+    {
+        return is_complete_message_check_ ? is_complete_message_check_(data) : true;
+    }
+    void set_session(std::shared_ptr<SessionType> port)
+    {
+        session_ = std::move(port);
+    }
+
+
+
+    void set_error_handler(ErrorHandler handler)
+    {
+        error_handler_ = std::move(handler);
+    }
+
+    void on_error(const std::error_code &ec, const std::string &what)
+    {
+        if (error_handler_)
+        {
+            error_handler_(session_, ec, what);
+        }
+    }
+private:
+    void set_write_preprocessor(PreProcessor processor)
+    {
+        write_preprocessor_ = std::move(processor);
+    }
+
+    void set_read_postprocessor(PostProcessor processor)
+    {
+        read_postprocessor_ = std::move(processor);
+    }
+
+    void set_is_complete_message_check(IsCompleteMessageCheck is_complete_message)
+    {
+        is_complete_message_check_ = std::move(is_complete_message);
+    }
+
+    std::shared_ptr<SessionType> session_{};
+    ConnectedCallback connected_callback_{};
+    ClosedCallback closed_callback_{};
+    MessageHandler message_handler_{};
+
+    SenderFramingType send_framing_;
+    ReceiverFramingType receive_framing_;
+
+    PreProcessor write_preprocessor_;
+    PostProcessor read_postprocessor_;
+
+    ErrorHandler error_handler_{};
+
+    IsCompleteMessageCheck is_complete_message_check_;
+};
+</file>
+
+<file path="networking_suite\include\UDPMessageFraming.h" lines="101" modified="2024-09-09 08:35:17">
+//
+// Created by maxim on 09.09.2024.
+//
+
+#pragma once
+
+#include <vector>
+#include <cstdint>
+#include <stdexcept>
+#include <memory>
+#include <nlohmann/json.hpp>
+
+using ByteVector = std::vector<uint8_t>;
+using json = nlohmann::json;
+
+class UDPMessageFraming {
+public:
+    explicit UDPMessageFraming(const json& initializingData)
+    {
+        initializingData_ = std::make_shared<json>(initializingData);
+    }
+    virtual ~UDPMessageFraming() = default;
+
+    virtual ByteVector frameMessage(const ByteVector& message) const = 0;
+    virtual bool isCompleteMessage(const ByteVector& buffer) const = 0;
+    virtual ByteVector extractMessage(const ByteVector& buffer) = 0;
+    virtual size_t getMaxFramingOverhead() const = 0;
+
+    void setConnectionData(const json& data) {
+        connectionData_ = std::make_shared<json>(data);
+    }
+
+    std::shared_ptr<json> getConnectionData() const {
+        return connectionData_;
+    }
+
+protected:
+    std::shared_ptr<json> initializingData_;
+    std::shared_ptr<json> connectionData_;
+};
+
+class UDPMagicNumberFraming : public UDPMessageFraming {
+public:
+    explicit UDPMagicNumberFraming(const json initializingData)
+        : UDPMessageFraming(initializingData)
+    {
+        startMagicNumber_ = (*initializingData_)["magic_number_start"];
+        endMagicNumber_ = (*initializingData_)["magic_number_end"];
+    }
+
+    [[nodiscard]] ByteVector frameMessage(const ByteVector& message) const override {
+        ByteVector framedMessage;
+        framedMessage.reserve(sizeof(uint32_t) * 3 + message.size());
+
+        appendToVector(framedMessage, startMagicNumber_);
+        appendToVector(framedMessage, static_cast<uint32_t>(message.size()));
+        framedMessage.insert(framedMessage.end(), message.begin(), message.end());
+        appendToVector(framedMessage, endMagicNumber_);
+
+        return framedMessage;
+    }
+
+    bool isCompleteMessage(const ByteVector& buffer) const override {
+        if (buffer.size() < sizeof(uint32_t) * 3) return false;
+
+        uint32_t startMagic, messageSize, endMagic;
+        std::memcpy(&startMagic, buffer.data(), sizeof(uint32_t));
+        std::memcpy(&messageSize, buffer.data() + sizeof(uint32_t), sizeof(uint32_t));
+        std::memcpy(&endMagic, buffer.data() + buffer.size() - sizeof(uint32_t), sizeof(uint32_t));
+
+        return startMagic == startMagicNumber_ &&
+               endMagic == endMagicNumber_ &&
+               buffer.size() == messageSize + sizeof(uint32_t) * 3;
+    }
+
+    ByteVector extractMessage(const ByteVector& buffer) override {
+        if (!isCompleteMessage(buffer)) {
+            throw std::runtime_error("Incomplete or invalid message");
+        }
+
+        uint32_t messageSize;
+        std::memcpy(&messageSize, buffer.data() + sizeof(uint32_t), sizeof(uint32_t));
+
+        return ByteVector(buffer.begin() + sizeof(uint32_t) * 2,
+                          buffer.begin() + sizeof(uint32_t) * 2 + messageSize);
+    }
+
+    size_t getMaxFramingOverhead() const override {
+        return sizeof(uint32_t) * 3;  // Start magic, size, and end magic
+    }
+
+private:
+    uint32_t startMagicNumber_;
+    uint32_t endMagicNumber_;
+
+    static void appendToVector(ByteVector& vec, uint32_t value) {
+        vec.insert(vec.end(),
+                   reinterpret_cast<const uint8_t*>(&value),
+                   reinterpret_cast<const uint8_t*>(&value) + sizeof(uint32_t));
+    }
+};
+</file>
+
+<file path="networking_suite\include\UDPNetworkUtility.h" lines="228" modified="2024-09-12 00:58:08">
+
+
+#pragma once
+
+#include <asio.hpp>
+#include <functional>
+#include <memory>
+#include <atomic>
+#include "SessionContext.h"
+#include "BufferPool.h"
+#include "Logger.h"
+#include "Utilities.h"
+#include "nlohmann/json.hpp"
+
+using json = nlohmann::json;
+class UDPNetworkUtility {
+public:
+    template< typename SenderFramingType, typename ReceiverFramingType>
+    class Session : public std::enable_shared_from_this<Session<SenderFramingType, ReceiverFramingType>> {
+    private:
+        asio::ip::udp::socket socket_;
+        std::string connectionUuid_;
+        asio::strand<asio::io_context::executor_type> strand_;
+        std::shared_ptr<BufferPool> buffer_pool_;
+        LockFreeQueue<ByteVector*, 1024> send_queue_;
+        std::atomic<bool> is_closed_{false};
+        SessionContext<Session, SenderFramingType, ReceiverFramingType> connection_context_;
+
+        ByteVector receive_buffer_;
+
+    public:
+        explicit Session(asio::io_context& io_context)
+            : socket_(io_context, asio::ip::udp::endpoint(asio::ip::udp::v4(), 0)),
+              connectionUuid_(Utilities::generateUuid()),
+              strand_(asio::make_strand(io_context)),
+              buffer_pool_(std::make_shared<BufferPool>(65536)),
+              resolver(io_context)
+        {
+            receive_buffer_.reserve(buffer_pool_->getBufferSize());
+        }
+
+        auto get_shared_this() {
+            return this->shared_from_this();
+        }
+
+        void start(const SessionContext<Session, SenderFramingType, ReceiverFramingType>& connection_context) {
+            connection_context_ = connection_context;
+            connection_context_.set_session(get_shared_this());
+            connection_context_.on_connect();
+            do_receive();
+        }
+
+        bool is_closed() const { return is_closed_.load(std::memory_order_acquire); }
+
+
+        asio::ip::udp::socket& socket() { return socket_; }
+
+        std::string getConnectionUuid() { return connectionUuid_; }
+
+        void send(const ByteVector& message) {
+            if (is_closed()) {
+                return;
+            }
+
+            ByteVector* buffer = buffer_pool_->acquire();
+            *buffer = connection_context_.preprocess_write(message);
+
+            asio::post(strand_, [this, buffer]() {
+                send_queue_.push(buffer);
+                if (send_queue_.size() == 1) {
+                    do_send();
+                }
+            });
+        }
+
+        void close() {
+
+            asio::post(strand_, [this, self = get_shared_this()]() {
+                do_close();
+            });
+        }
+
+        asio::ip::udp::resolver resolver;
+        asio::ip::udp::endpoint endpoint;
+
+    private:
+        void do_receive() {
+            if (!socket_.is_open()) {
+                LOG_ERROR("Socket is not open");
+                return;
+            }
+            auto receive_buffer = buffer_pool_->acquire();
+            receive_buffer->resize(buffer_pool_->getBufferSize());
+
+            socket_.async_receive_from(
+                asio::buffer(*receive_buffer), endpoint,
+                asio::bind_executor(strand_, [this, self = get_shared_this(), receive_buffer](
+                    const asio::error_code& ec, std::size_t bytes_received) {
+                    if (!ec) {
+                        receive_buffer->resize(bytes_received);
+                        process_received_data(*receive_buffer);
+                        do_receive();
+                    } else {
+                        LOG_ERROR("Error in receive: %s", ec.message().c_str());
+                        close();
+                    }
+                    buffer_pool_->release(receive_buffer);
+                }));
+        }
+
+        void process_received_data(const ByteVector& new_data) {
+            receive_buffer_.insert(receive_buffer_.end(), new_data.begin(), new_data.end());
+
+            while (true) {
+                if (connection_context_.checkIfIsCompleteMessage(receive_buffer_)) {
+                    ByteVector message = connection_context_.postprocess_read(receive_buffer_);
+                    size_t message_size = receive_buffer_.size();
+                    receive_buffer_.erase(receive_buffer_.begin(), receive_buffer_.begin() + static_cast<int>(message_size));
+
+                    connection_context_.on_message(message);
+                } else {
+                    break;
+                }
+            }
+
+            if (receive_buffer_.size() > buffer_pool_->getBufferSize()) {
+                LOG_WARNING("Receive buffer overflow, discarding old data");
+                receive_buffer_.erase(receive_buffer_.begin(), receive_buffer_.end() - static_cast<int>(buffer_pool_->getBufferSize()));
+            }
+        }
+
+        void do_send() {
+            if (is_closed()) {
+                return;
+            }
+
+            auto buffer = send_queue_.pop();
+            if (!buffer) {
+                return;
+            }
+
+            socket_.async_send_to(
+                asio::buffer(**buffer), endpoint,
+                asio::bind_executor(strand_, [this, self = get_shared_this(), buffer](
+                    const asio::error_code& ec, std::size_t bytes_sent) {
+                    buffer_pool_->release(*buffer);
+
+                    if (!ec) {
+                        LOG_DEBUG("Sent %zu bytes", bytes_sent);
+                        if (!send_queue_.empty()) {
+                            do_send();
+                        }
+                    } else {
+                        LOG_ERROR("Error in send: %s", ec.message().c_str());
+                        close();
+                    }
+                }));
+        }
+
+        void do_close() {
+
+            if (is_closed_.exchange(true, std::memory_order_acq_rel)) {
+                return;
+            }
+            // Clear the write queue
+            while (auto opt_buffer = send_queue_.pop()) {
+                buffer_pool_->release(*opt_buffer);
+            }
+
+            if (!socket_.is_open())
+            {
+                connection_context_.on_close();
+                return; // Socket is already closed
+            }
+
+            std::error_code ec;
+
+            // Cancel any pending asynchronous operations
+            socket_.cancel(ec);
+            if (ec)
+            {
+                LOG_ERROR("Error cancelling pending operations: %s", ec.message().c_str());
+            }
+
+            // Shutdown the socket
+            socket_.shutdown(asio::ip::tcp::socket::shutdown_both, ec);
+            if (ec && ec != asio::error::not_connected)
+            {
+                LOG_ERROR("Error shutting down socket: %s", ec.message().c_str());
+            }
+
+            // Close the socket
+            socket_.close(ec);
+            if (ec)
+            {
+                LOG_ERROR("Error closing socket: %s", ec.message().c_str());
+            }
+
+            connection_context_.on_close();
+        }
+    };
+    template< typename SenderFramingType, typename ReceiverFramingType>
+    using MessageCallback = std::function<void(const std::shared_ptr<Session<SenderFramingType, ReceiverFramingType>>&, const ByteVector&)>;
+
+    template< typename SenderFramingType, typename ReceiverFramingType>
+    static std::shared_ptr<Session<SenderFramingType, ReceiverFramingType>> create_connection(asio::io_context& io_context) {
+        return std::make_shared<Session<SenderFramingType, ReceiverFramingType>>(io_context);
+    }
+
+    template< typename SenderFramingType, typename ReceiverFramingType>
+    static std::shared_ptr<Session<SenderFramingType, ReceiverFramingType>> connect(
+        asio::io_context& io_context,
+        const std::string& host,
+        const std::string& port,
+        SessionContext<Session<SenderFramingType, ReceiverFramingType>, SenderFramingType, ReceiverFramingType> connection_context
+) {
+
+        auto connection = create_connection<SenderFramingType, ReceiverFramingType>(io_context);
+
+
+        auto endpoints = connection->resolver.resolve(asio::ip::udp::v4(), host, port);
+        connection->endpoint = *endpoints.begin();
+
+        connection->start(connection_context);
+
+        return connection;
+    }
+};
+</file>
+
+<file path="networking_suite\include\Utilities.h" lines="97" modified="2024-09-07 23:12:58">
+//
+// Created by maxim on 23.08.2024.
+//
+#pragma once
+
+#include <array>
+#include <random>
+#include <sstream>
+#include <iomanip>
+#include <unordered_map>
+
+namespace Utilities
+{
+    std::string generateUuid() {
+        static std::random_device rd;
+        static std::mt19937_64 gen(rd());
+        static std::uniform_int_distribution<> dis(0, 255);
+
+        std::array<unsigned char, 16> bytes;
+        for (unsigned char& byte : bytes) {
+            byte = dis(gen);
+        }
+
+        // Set version to 4
+        bytes[6] = (bytes[6] & 0x0F) | 0x40;
+        // Set variant to 1
+        bytes[8] = (bytes[8] & 0x3F) | 0x80;
+
+        std::stringstream ss;
+        ss << std::hex << std::setfill('0');
+
+        for (int i = 0; i < 16; ++i) {
+            if (i == 4 || i == 6 || i == 8 || i == 10) {
+                ss << '-';
+            }
+            ss << std::setw(2) << static_cast<int>(bytes[i]);
+        }
+
+        std::string uuid = ss.str();
+
+        return uuid;
+    }
+}
+
+namespace Base64Utilities
+{
+    std::string from_base64(const std::string& input)
+    {
+        static const std::string b64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        static std::unordered_map<char, int> b64_index;
+        if (b64_index.empty()) {
+            for (int i = 0; i < 64; ++i) {
+                b64_index[b64_chars[i]] = i;
+            }
+        }
+
+        std::string result;
+        int val = 0;
+        int val_b = -8;
+        for (char c : input) {
+            if (c == '=') break;
+            if (b64_index.find(c) == b64_index.end()) continue;
+
+            val = (val << 6) + b64_index[c];
+            val_b += 6;
+            if (val_b >= 0) {
+                result.push_back(char((val >> val_b) & 0xFF));
+                val_b -= 8;
+            }
+        }
+
+        return result;
+    }
+
+    std::string to_base_64(const std::string& input)
+    {
+        // Convert hash to base64
+        static const char* b64_table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        std::string result;
+        unsigned int val = 0;
+        int val_b = -6;
+        for (int i = 0; i < input.length(); i += 2) {
+            unsigned char c = std::stoi(input.substr(i, 2), nullptr, 16);
+            val = (val << 8) + c;
+            val_b += 8;
+            while (val_b >= 0) {
+                result.push_back(b64_table[(val >> val_b) & 0x3F]);
+                val_b -= 6;
+            }
+        }
+        if (val_b > -6) result.push_back(b64_table[((val << 8) >> (val_b + 8)) & 0x3F]);
+        while (result.size() % 4) result.push_back('=');
+
+        return result;
+    }
+}
+</file>
+

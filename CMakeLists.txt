@@ -12,6 +12,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 find_package(Threads REQUIRED)
 find_package(CURL REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(asio CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)  # Add OpenSSL package
 # Print nlohmann JSON include directory for debugging
 message(STATUS "nlohmann_json include dir: ${nlohmann_json_INCLUDE_DIRS}")
@@ -19,7 +20,7 @@ message(STATUS "nlohmann_json include dir: ${nlohmann_json_INCLUDE_DIRS}")
 add_definitions(-DASIO_STANDALONE)
 
 # Set Asio include directory
-set(ASIO_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/asio-1-28-0/asio/include/)
+
 
 # Check if Asio directory exists
 if(NOT EXISTS ${ASIO_INCLUDE_DIR})
@@ -52,15 +53,13 @@ function(add_common_settings target)
     target_include_directories(${target} PRIVATE
             ${ASIO_INCLUDE_DIR}
             ${OPENSSL_INCLUDE_DIR}
-            ${nlohmann_json_INCLUDE_DIR}# Add OpenSSL include directory
+            ${nlohmann_json_INCLUDE_DIR}
+            ${CMAKE_SOURCE_DIR}/networking_suite/include
+    )
+    set_target_properties(${target} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     )
 endfunction()
 
 add_subdirectory(examples/echo_server_example)
 add_subdirectory(examples/http_server_example)
-
-# Print include directories for debugging
-get_property(dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES)
-foreach(dir ${dirs})
-    message(STATUS "Include dir: '${dir}'")
-endforeach()

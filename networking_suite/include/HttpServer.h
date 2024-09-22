@@ -12,21 +12,57 @@
 #include <functional>
 #include <regex>
 
+
 struct RouteContext {
     std::string pattern;
     std::regex regex;
+
+    std::unordered_map<std::string, nlohmann::json> route_data;
 };
+
+enum class MiddlewareType {
+    PRE_HANDLER,
+    POST_HANDLER
+};
+
+class Middleware {
+public:
+    virtual ~Middleware() = default;
+    virtual void process(RouteContext& route_context, const HttpRequest& request, HttpResponse& response, std::function<void()> next) = 0;
+};
+
+
 
 class HttpServer {
 public:
+    class HttpRoute {
+    public:
+        using RequestHandler = std::function<void(RouteContext& route_context, const HttpRequest& request, HttpResponse& response)>;
 
-    using RequestHandler = std::function<void(RouteContext route_context, const HttpRequest& request, HttpResponse& response)>;
+        HttpRoute(const std::string& pattern, const std::regex& regex, const RequestHandler& handler)
+            : pattern(pattern), regex(regex), handler(handler) {}
+
+        void addMiddleware(const std::shared_ptr<Middleware>& middleware, const MiddlewareType type) {
+            if (type == MiddlewareType::PRE_HANDLER) {
+                pre_middlewares.push_back(middleware);
+            } else {
+                post_middlewares.push_back(middleware);
+            }
+        }
+
+        std::string pattern;
+        std::regex regex;
+        RequestHandler handler;
+        std::vector<std::shared_ptr<Middleware>> pre_middlewares;
+        std::vector<std::shared_ptr<Middleware>> post_middlewares;
+    };
+
     explicit HttpServer(const std::string& config_file)
-        : config_(std::make_shared<Config>()), message_framing_(), ssl_message_framing_()
+        : message_framing_(), ssl_message_framing_(), config_(std::make_shared<Config>())
     {
         config_->load(config_file);
 
-        unsigned int thread_count = config_->get<unsigned int>("thread_count", 4);
+        auto thread_count = config_->get<unsigned int>("thread_count", 4);
         thread_pool_ = std::make_shared<AsioThreadPool>(thread_count);
         server_ = std::make_unique<Server>(thread_pool_, *config_);
 
@@ -34,7 +70,7 @@ public:
         setupHTTPSServer();
 
         // Initialize FileServer with root directory from config
-        std::string root_dir = config_->get<std::string>("file_server_root", "./public");
+        auto root_dir = config_->get<std::string>("file_server_root", "./public");
         file_server_ = std::make_unique<FileServer>(root_dir);
     }
 
@@ -46,18 +82,13 @@ public:
         server_->stop();
     }
 
-    void addRoute(const std::string& path, const RequestHandler &handler) {
-        std::string pattern = path + "(\\?.*)?$";
-        routes_.push_back({path, std::regex(pattern), handler});
+    std::shared_ptr<HttpRoute> addRoute(const std::string& path, const HttpRoute::RequestHandler &handler) {
+        const std::string pattern = path + "(\\?.*)?$";
+        routes_.push_back(std::make_shared<HttpRoute>(path, std::regex(pattern), handler));
+        return routes_.back();
     }
 
 private:
-    struct RouteInfo {
-        std::string pattern;
-        std::regex regex;
-        RequestHandler handler;
-    };
-
 
 
     void setupHTTPServer() {
@@ -84,18 +115,13 @@ private:
         ssl_handler_.set_message_framing_sender(ssl_message_framing_);
         ssl_handler_.set_message_framing_receiver(ssl_message_framing_2);
         ssl_handler_.set_message_handler([this](const std::shared_ptr<NetworkSession<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
-            handleHTTPSRequest(session, data);
+            handleHTTPRequest(session, data);
         });
 
         server_->addSslTcpPort(https_port, ssl_cert, ssl_key, ssl_dh_file, ssl_handler_);
     }
 
-
     void handleHTTPRequest(const std::shared_ptr<NetworkSession<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
-        processRequest(session, data);
-    }
-
-    void handleHTTPSRequest(const std::shared_ptr<NetworkSession<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
         processRequest(session, data);
     }
 
@@ -116,24 +142,28 @@ private:
             path = full_path.substr(0, query_pos);
         }
 
-        HttpHeader headers = request.header();
-
-        std::string body;
-        if (static_cast<int>(data.size()) > 0) {
-            body = std::string(data.begin(), data.end());
-        }
 
         bool route_handled = false;
 
         // Check for matching routes
         for (const auto& route : routes_) {
             std::smatch matches;
-            if (std::regex_match(path, matches, route.regex)) {
-                route.handler(RouteContext{route.pattern, route.regex}, request, response);
+            if (std::regex_match(path, matches, route->regex)) {
+                // Execute pre-handler middlewares
+                RouteContext route_context = {route->pattern, route->regex};
+                executeMiddlewares(route->pre_middlewares, request, response, [&]() {
+                    // Execute the main handler
+                    route->handler(route_context, request, response);
+
+                    // Execute post-handler middlewares
+                    executeMiddlewares(route->post_middlewares, request, response, []() {});
+                });
+
                 route_handled = true;
                 break;
             }
         }
+
 
         // If no route handled the request, try to serve a file
         if (!route_handled) {
@@ -162,6 +192,22 @@ private:
         session->close();
     }
 
+    static void executeMiddlewares(const std::vector<std::shared_ptr<Middleware>>& middlewares, RouteContext& route_context,
+                                   const HttpRequest& request, HttpResponse& response,
+                                   const std::function<void()> &final_action) {
+        std::function<void(size_t)> execute_next = [&](size_t index) {
+            if (index < middlewares.size()) {
+                middlewares[index]->process(route_context, request, response, [=]() {
+                    execute_next(index + 1);
+                });
+            } else {
+                final_action();
+            }
+        };
+
+        execute_next(0);
+    }
+
     SessionContext<NetworkSession<HttpMessageFraming, HttpMessageFraming>, HttpMessageFraming, HttpMessageFraming> tcp_handler_;
     HttpMessageFraming message_framing_;
     HttpMessageFraming message_framing_2;
@@ -171,6 +217,6 @@ private:
     std::shared_ptr<Config> config_;
     std::shared_ptr<AsioThreadPool> thread_pool_;
     std::unique_ptr<Server> server_;
-    std::vector<RouteInfo> routes_;
+    std::vector<std::shared_ptr<HttpRoute>> routes_;
     std::unique_ptr<FileServer> file_server_;
 };
