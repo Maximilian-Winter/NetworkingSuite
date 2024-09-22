@@ -85,7 +85,7 @@ public:
                           buffer.begin() + sizeof(uint32_t) * 2 + messageSize);
     }
 
-    size_t getMaxFramingOverhead() const override {
+    [[nodiscard]] size_t getMaxFramingOverhead() const override {
         return sizeof(uint32_t) * 3;  // Start magic, size, and end magic
     }
 

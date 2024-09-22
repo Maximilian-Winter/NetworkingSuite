@@ -144,15 +144,14 @@ public:
 
     bool is_closed() const { return is_closed_.load(std::memory_order_acquire); }
 
-    auto &socket()
+    auto &tcp_socket()
     {
-        if (protocol_type_ == ProtocolType::TCP)
-        {
-            return std::get<asio::ip::tcp::socket>(socket_);
-        }
+        return std::get<asio::ip::tcp::socket>(socket_);
+    }
+    auto &udp_socket()
+    {
         return std::get<asio::ip::udp::socket>(socket_);
     }
-
     std::string getSessionUuid() const { return sessionUuid_; }
 
     void write(const ByteVector &message)
@@ -529,13 +528,13 @@ public:
         asio::ip::tcp::resolver resolver(io_context);
         auto endpoints = resolver.resolve(host, port);
 
-        asio::async_connect(session->socket(), endpoints,
+        asio::async_connect(session->tcp_socket(), endpoints,
                             [session, connection_context, host](const std::error_code &ec,
                                                                 const asio::ip::tcp::endpoint &)
                             {
                                 if (!ec)
                                 {
-                                    session->socket().set_option(asio::ip::tcp::no_delay(true));
+                                    session->tcp_socket().set_option(asio::ip::tcp::no_delay(true));
                                     session->start(connection_context, SessionRole::CLIENT, host, true);
                                 } else
                                 {

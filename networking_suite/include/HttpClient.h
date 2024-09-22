@@ -246,7 +246,7 @@ inline std::future<HttpResponse> HttpClient::sendRequest(const std::string& url,
         session->close();
     });
 
-    session_ = NetworkSession<HttpMessageFraming, HttpMessageFraming>::connect(
+    session_ = NetworkSession<HttpMessageFraming, HttpMessageFraming>::connect_tcp(
         io_context_,
         host,
         port,

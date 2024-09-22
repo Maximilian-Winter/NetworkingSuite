@@ -48,7 +48,7 @@ public:
     }
 
     template< typename SenderFramingType, typename ReceiverFramingType>
-    void addUdpPort(unsigned short port_number, SessionContext<UDPNetworkUtility::Session<SenderFramingType, ReceiverFramingType>, SenderFramingType, ReceiverFramingType>& connection_context) {
+    void addUdpPort(unsigned short port_number, SessionContext<NetworkSession<SenderFramingType, ReceiverFramingType>, SenderFramingType, ReceiverFramingType>& connection_context) {
         auto udp_port = std::make_shared<UdpPort<SenderFramingType, ReceiverFramingType>>(thread_pool_->get_io_context(), port_number,connection_context);
         ports_.push_back(udp_port);
     }

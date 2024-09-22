@@ -189,7 +189,10 @@ private:
         }
         std::string response_string = response.toString();
         session->write(ByteVector(response_string.begin(), response_string.end()));
-        session->close();
+
+        if (request.header().getField("Connection") != "keep-alive") {
+            session->close();
+        }
     }
 
     static void executeMiddlewares(const std::vector<std::shared_ptr<Middleware>>& middlewares, RouteContext& route_context,

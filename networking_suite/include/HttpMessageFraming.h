@@ -19,11 +19,11 @@ public:
     {
     }
 
-    ByteVector frameMessage(const ByteVector& message) const override {
+    [[nodiscard]] ByteVector frameMessage(const ByteVector& message) const override {
         return message;
     }
 
-    bool isCompleteMessage(const ByteVector& buffer) const override {
+    [[nodiscard]] bool isCompleteMessage(const ByteVector& buffer) const override {
         if(!HttpParser::isValidHttpMessage(buffer))
         {
            return false;

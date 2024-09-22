@@ -9,7 +9,7 @@
 #include <memory>
 #include <NetworkSession.h>
 #include <shared_mutex>
-#include <UDPNetworkUtility.h>
+
 #include <utility>
 
 #include "SessionContext.h"
@@ -146,7 +146,7 @@ private:
     std::mutex user_mutex;
     asio::ip::udp::socket socket_;
     asio::ip::udp::endpoint sender_endpoint_;
-    SessionContext<UDPNetworkUtility::Session<SenderFramingType, ReceiverFramingType>,SenderFramingType, ReceiverFramingType>& connection_context_;
-    std::unordered_map<std::string, std::shared_ptr<UDPNetworkUtility::Session<SenderFramingType, ReceiverFramingType>> > connected_users_;
+    SessionContext<NetworkSession<SenderFramingType, ReceiverFramingType>,SenderFramingType, ReceiverFramingType>& connection_context_;
+    std::unordered_map<std::string, std::shared_ptr<NetworkSession<SenderFramingType, ReceiverFramingType>> > connected_users_;
     static constexpr std::size_t buffer_size = 65536;
 };
