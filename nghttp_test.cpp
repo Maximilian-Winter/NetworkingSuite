@@ -229,35 +229,15 @@ private:
         DEBUG_LOG("end of do_read");
     }
 
-    int session_send()
+    int session_send() const
     {
-        int rv;
-        for (;;) {
-            const uint8_t *data;
-            size_t length;
-            rv = nghttp2_session_send(session_);
-            if (rv != 0) {
-                std::cerr << "nghttp2_session_send error: "
-                          << nghttp2_strerror(rv) << std::endl;
-                return -1;
-            }
-            if (nghttp2_session_want_write(session_) == 0) {
-                break;
-            }
-            length = nghttp2_session_mem_send2(session_, &data);
-            if (length == 0) {
-                break;
-            }
-
-            //nghttp2_session_send(session_);
-            auto self = shared_from_this();
-            asio::async_write(*socket_, asio::buffer(data, length),
-                              [this, self](std::error_code ec, std::size_t /*length*/) {
-                                  if (ec) {
-                                      std::cerr << "Write error: " << ec.message() << std::endl;
-                                  }
-                              });
+        int rv = nghttp2_session_send(session_);
+        if (rv != 0) {
+            std::cerr << "nghttp2_session_send error: "
+                      << nghttp2_strerror(rv) << std::endl;
+            return -1;
         }
+
         return 0;
     }
 
