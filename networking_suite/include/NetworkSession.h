@@ -5,6 +5,7 @@
 #include <memory>
 #include <atomic>
 #include <type_traits>
+#include <utility>
 #include <variant>
 
 #include "BufferPool.h"
@@ -113,7 +114,7 @@ public:
                const std::string &hostname = "",
                bool allow_self_signed = false)
     {
-        connection_context_ = context;
+        connection_context_ = std::move(context);
         connection_context_->set_session(this->shared_from_this());
         session_role_ = session_role;
         allow_self_signed_ = allow_self_signed;
@@ -245,16 +246,27 @@ private:
         auto read_handler = [this, self = this->shared_from_this(), read_buffer](
             const asio::error_code &ec, std::size_t bytes_transferred)
         {
-            if (!ec)
+            if(connection_context_->get_read_completion_handler())
             {
-                read_buffer->resize(bytes_transferred);
-                process_read_data(*read_buffer);
-                do_read();
-            } else if (ec != asio::error::operation_aborted)
+                auto do_read_lambda = [this, self = this->shared_from_this()]()
+                {
+                    do_read();
+                };
+                connection_context_->read_completion_handler(read_buffer_, ec, bytes_transferred, do_read_lambda);
+            }
+            else
             {
-                LOG_DEBUG("Error in read: %s", ec.message().c_str());
-                connection_context_->on_error(ec, "Read operation failed");
-                close();
+                if (!ec)
+                {
+                    read_buffer->resize(bytes_transferred);
+                    process_read_data(*read_buffer);
+                    do_read();
+                } else if (ec != asio::error::operation_aborted)
+                {
+                    LOG_DEBUG("Error in read: %s", ec.message().c_str());
+                    connection_context_->on_error(ec, "Read operation failed");
+                    close();
+                }
             }
             buffer_pool_->release(read_buffer);
         };
@@ -323,20 +335,31 @@ private:
             const asio::error_code &ec, std::size_t bytes_written)
         {
             buffer_pool_->release(*buffer);
-
-            if (!ec)
+            if(connection_context_->get_write_completion_handler())
             {
-                LOG_DEBUG("Wrote %zu bytes", bytes_written);
-                if (!write_queue_.empty())
+                auto do_write_lambda = [this, self = this->shared_from_this()]()
                 {
                     do_write();
-                }
-            } else if (ec != asio::error::operation_aborted)
-            {
-                LOG_DEBUG("Error in write: %s", ec.message().c_str());
-                connection_context_->on_error(ec, "Write operation failed");
-                close();
+                };
+                connection_context_->write_completion_handler(ec, bytes_written, do_write_lambda);
             }
+            else
+            {
+                if (!ec)
+                {
+                    LOG_DEBUG("Wrote %zu bytes", bytes_written);
+                    if (!write_queue_.empty())
+                    {
+                        do_write();
+                    }
+                } else if (ec != asio::error::operation_aborted)
+                {
+                    LOG_DEBUG("Error in write: %s", ec.message().c_str());
+                    connection_context_->on_error(ec, "Write operation failed");
+                    close();
+                }
+            }
+
         };
 
         if (is_ssl_)

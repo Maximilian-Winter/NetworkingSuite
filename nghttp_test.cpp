@@ -20,6 +20,8 @@ typedef __int64 ssize_t;
 #include <asio.hpp>
 #include <asio/ssl.hpp>
 #include <nghttp2/nghttp2.h>
+#include <openssl/err.h>
+#include <openssl/ssl.h>
 
 #define MAKE_NV(NAME, VALUE)                                                   \
 {                                                                            \
@@ -41,6 +43,31 @@ std::cerr << ss.str() << " [" << __FILE__ << ":" << __LINE__ << "] " << msg << s
 } while(0)
 
 
+// Add this function for path security check
+bool check_path(const std::string& path) {
+    return !path.empty() && path[0] == '/' &&
+           path.find("\\") == std::string::npos &&
+           path.find("/../") == std::string::npos &&
+           path.find("/./") == std::string::npos &&
+           path.substr(path.length() - 3) != "/.." &&
+           path.substr(path.length() - 2) != "/.";
+}
+
+// Add this function for percent decoding
+std::string percent_decode(const std::string& value) {
+    std::string result;
+    for (size_t i = 0; i < value.length(); ++i) {
+        if (value[i] == '%' && i + 2 < value.length()) {
+            int hex = std::stoi(value.substr(i + 1, 2), nullptr, 16);
+            result += static_cast<char>(hex);
+            i += 2;
+        } else {
+            result += value[i];
+        }
+    }
+    return result;
+}
+
 class Http2Session : public std::enable_shared_from_this<Http2Session>
 {
 public:
@@ -49,6 +76,10 @@ public:
         : socket_(std::move(socket)), strand_(asio::make_strand(io_context))
     {
         initialize_nghttp2_session();
+
+        // Set TCP_NODELAY
+        asio::ip::tcp::no_delay option(true);
+        socket_->lowest_layer().set_option(option);
     }
 
     void start()
@@ -77,6 +108,12 @@ private:
         DEBUG_LOG("initialize_nghttp2_session");
         nghttp2_session_callbacks *callbacks;
         nghttp2_session_callbacks_new(&callbacks);
+
+        nghttp2_session_callbacks_set_on_begin_frame_callback(callbacks,
+                    [](nghttp2_session *session, const nghttp2_frame_hd *hd, void *user_data) -> int {
+                        auto self = static_cast<Http2Session*>(user_data);
+                        return self->on_begin_frame(hd);
+                    });
 
         nghttp2_session_callbacks_set_send_callback2(callbacks,
                                                      [](nghttp2_session *session, const uint8_t *data, size_t length,
@@ -126,17 +163,31 @@ private:
         nghttp2_session_callbacks_del(callbacks);
         DEBUG_LOG("End of initialize_nghttp2_session");
     }
-
+    int on_begin_frame(const nghttp2_frame_hd* hd) {
+        if (hd->type == NGHTTP2_SETTINGS && hd->flags & NGHTTP2_FLAG_ACK) {
+            const unsigned char* alpn = nullptr;
+            unsigned int alpnlen = 0;
+            SSL_get0_alpn_selected(socket_->native_handle(), &alpn, &alpnlen);
+            if (alpn == nullptr || alpnlen != 2 || memcmp("h2", alpn, 2) != 0) {
+                std::cerr << "Error: h2 is not negotiated" << std::endl;
+                return NGHTTP2_ERR_CALLBACK_FAILURE;
+            }
+        }
+        return 0;
+    }
     void send_connection_header()
     {
-        DEBUG_LOG("send_connection_header");
-        nghttp2_settings_entry iv[1] = {
-            {NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS, 100}
+        nghttp2_settings_entry iv[2] = {
+            {NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS, 100},
+            {NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE, 1048576}
         };
 
-        nghttp2_submit_settings(session_, NGHTTP2_FLAG_NONE, iv, 1);
+        int rv = nghttp2_submit_settings(session_, NGHTTP2_FLAG_NONE, iv, 2);
+        if (rv != 0) {
+            std::cerr << "Fatal error: " << nghttp2_strerror(rv) << std::endl;
+            return;
+        }
         session_send();
-        DEBUG_LOG("End of send_connection_header");
     }
 
 
@@ -180,39 +231,33 @@ private:
 
     int session_send()
     {
-        DEBUG_LOG("session_send");
         int rv;
-        for (;;)
-        {
+        for (;;) {
             const uint8_t *data;
             size_t length;
             rv = nghttp2_session_send(session_);
-            if (rv != 0)
-            {
+            if (rv != 0) {
                 std::cerr << "nghttp2_session_send error: "
-                        << nghttp2_strerror(rv) << std::endl;
+                          << nghttp2_strerror(rv) << std::endl;
                 return -1;
             }
-            if (nghttp2_session_want_write(session_) == 0)
-            {
+            if (nghttp2_session_want_write(session_) == 0) {
                 break;
             }
             length = nghttp2_session_mem_send2(session_, &data);
-            if (length == 0)
-            {
+            if (length == 0) {
                 break;
             }
+
+            //nghttp2_session_send(session_);
             auto self = shared_from_this();
             asio::async_write(*socket_, asio::buffer(data, length),
-                              [this, self](std::error_code ec, std::size_t /*length*/)
-                              {
-                                  if (ec)
-                                  {
+                              [this, self](std::error_code ec, std::size_t /*length*/) {
+                                  if (ec) {
                                       std::cerr << "Write error: " << ec.message() << std::endl;
                                   }
                               });
         }
-        DEBUG_LOG("End of session_send");
         return 0;
     }
 
@@ -304,13 +349,11 @@ private:
 
     int on_request_recv(int32_t stream_id)
     {
-        DEBUG_LOG("on_request_recv");
         std::shared_ptr<Stream> stream;
         {
             std::lock_guard<std::mutex> lock(streams_mutex_);
             auto it = streams_.find(stream_id);
-            if (it == streams_.end())
-            {
+            if (it == streams_.end()) {
                 return 0;
             }
             stream = it->second;
@@ -318,18 +361,20 @@ private:
 
         std::cout << "Received request for: " << stream->request_path << std::endl;
 
-        if (stream->request_path.empty() || stream->request_path[0] != '/')
-        {
-            DEBUG_LOG("Received request_path empty");
+        // Decode the path
+        std::string decoded_path = percent_decode(stream->request_path);
+
+        // Check path security
+        if (!check_path(decoded_path)) {
+            std::cerr << "Invalid path: " << decoded_path << std::endl;
             return error_reply(stream_id);
         }
 
-        std::string file_path = "." + stream->request_path;
+        std::string file_path = "." + decoded_path;
         stream->response_file.open(file_path, std::ios::binary);
 
-        if (!stream->response_file)
-        {
-            DEBUG_LOG("Failed to open response file");
+        if (!stream->response_file) {
+            std::cerr << "Failed to open file: " << file_path << std::endl;
             return error_reply(stream_id);
         }
 
@@ -341,8 +386,11 @@ private:
         data_prd.source.ptr = stream.get();
         data_prd.read_callback = file_read_callback;
 
-        nghttp2_submit_response2(session_, stream_id, hdrs, 1, &data_prd);
-        DEBUG_LOG("End of on_request_recv");
+        int rv = nghttp2_submit_response2(session_, stream_id, hdrs, 1, &data_prd);
+        if (rv != 0) {
+            std::cerr << "nghttp2_submit_response2 error: " << nghttp2_strerror(rv) << std::endl;
+            return -1;
+        }
         return session_send();
     }
 
@@ -415,7 +463,7 @@ public:
             | asio::ssl::context::single_dh_use);
         ssl_context_.use_certificate_chain_file(cert_file);
         ssl_context_.use_private_key_file(key_file, asio::ssl::context::pem);
-
+        SSL_CTX_set_alpn_select_cb(ssl_context_.native_handle(), alpn_select_proto_cb, nullptr);
         do_accept();
     }
 
@@ -425,27 +473,41 @@ private:
     asio::ssl::context ssl_context_;
     std::vector<std::shared_ptr<Http2Session> > sessions_;
 
+    static int alpn_select_proto_cb(SSL *ssl, const unsigned char **out,
+                                    unsigned char *outlen, const unsigned char *in,
+                                    unsigned int inlen, void *arg) {
+        int rv = nghttp2_select_next_protocol((unsigned char **)out, outlen, in, inlen);
+        if (rv != 1) {
+            return SSL_TLSEXT_ERR_NOACK;
+        }
+        return SSL_TLSEXT_ERR_OK;
+    }
+
     void do_accept()
     {
-        acceptor_.async_accept([this](std::error_code ec, asio::ip::tcp::socket socket)
-        {
-            if (!ec)
-            {
-                std::shared_ptr<asio::ssl::stream<asio::ip::tcp::socket> > ssl_stream_ = std::make_shared<
-                    asio::ssl::stream<asio::ip::tcp::socket> >(std::move(socket), ssl_context_);
+        acceptor_.async_accept([this](std::error_code ec, asio::ip::tcp::socket socket) {
+            if (!ec) {
+                auto endpoint = socket.remote_endpoint();
+                std::cout << "New connection from: " << endpoint.address().to_string()
+                          << ":" << endpoint.port() << std::endl;
+
+                std::shared_ptr<asio::ssl::stream<asio::ip::tcp::socket>> ssl_stream_ =
+                    std::make_shared<asio::ssl::stream<asio::ip::tcp::socket>>(std::move(socket), ssl_context_);
+
                 ssl_stream_->async_handshake(asio::ssl::stream_base::server,
-                                             [this, ssl_stream_](std::error_code ec)
-                                             {
-                                                 if (!ec)
-                                                 {
-                                                     std::cout << "SSL Handshake completed. Protocol: "
-                                                             << SSL_get_version(ssl_stream_->native_handle()) <<
-                                                             std::endl;
-                                                     sessions_.emplace_back(
-                                                         std::make_shared<Http2Session>(io_context, ssl_stream_));
-                                                     sessions_.back()->start();
-                                                 }
-                                             });
+                    [this, ssl_stream_, endpoint](std::error_code ec) {
+                        if (!ec) {
+                            std::cout << "SSL Handshake completed with "
+                                      << endpoint.address().to_string() << ":" << endpoint.port()
+                                      << ". Protocol: " << SSL_get_version(ssl_stream_->native_handle()) << std::endl;
+                            sessions_.emplace_back(std::make_shared<Http2Session>(io_context, ssl_stream_));
+                            sessions_.back()->start();
+                        } else {
+                            std::cerr << "SSL Handshake failed: " << ec.message() << std::endl;
+                        }
+                    });
+            } else {
+                std::cerr << "Accept error: " << ec.message() << std::endl;
             }
 
             do_accept();
