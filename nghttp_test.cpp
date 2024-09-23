@@ -176,12 +176,6 @@ public:
     }
 
 private:
-    struct Stream
-    {
-        int32_t stream_id;
-        std::string request_path;
-        std::ifstream response_file;
-    };
 
     std::shared_ptr<asio::ssl::stream<asio::ip::tcp::socket> > socket_;
     nghttp2_session *session_ = nullptr;
@@ -609,6 +603,7 @@ private:
 
     void do_accept()
     {
+
         acceptor_.async_accept([this](std::error_code ec, asio::ip::tcp::socket socket)
         {
             if (!ec)
