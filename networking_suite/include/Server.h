@@ -27,14 +27,14 @@ public:
         logger.addDestination(std::make_shared<AsyncLogger::ConsoleDestination>());
         logger.addDestination(std::make_shared<AsyncLogger::FileDestination>(log_file, log_file_size_in_mb * (1024 * 1024)));
     }
-    template< typename SenderFramingType, typename ReceiverFramingType>
-    void addTcpPort(unsigned short port_number, SessionContext<NetworkSession<SenderFramingType, ReceiverFramingType>, SenderFramingType, ReceiverFramingType> &connection_context) {
-        auto tcp_port = std::make_shared<TcpPort<SenderFramingType, ReceiverFramingType>>(thread_pool_->get_io_context(), port_number, connection_context);
+
+    void addTcpPort(unsigned short port_number, std::shared_ptr<SessionContext> connection_context) {
+        auto tcp_port = std::make_shared<TcpPort>(thread_pool_->get_io_context(), port_number, connection_context);
         ports_.push_back(tcp_port);
     }
 
-    template< typename SenderFramingType, typename ReceiverFramingType>
-    void addSslTcpPort(unsigned short port_number, const std::string& ssl_cert_file, const std::string& ssl_key_file, const std::string& ssl_dh_file, SessionContext<NetworkSession<SenderFramingType, ReceiverFramingType>, SenderFramingType, ReceiverFramingType>& connection_context) {
+
+    void addSslTcpPort(unsigned short port_number, const std::string& ssl_cert_file, const std::string& ssl_key_file, const std::string& ssl_dh_file, std::shared_ptr<SessionContext> connection_context) {
         ssl_contexts_.emplace_back(std::make_shared<asio::ssl::context>(asio::ssl::context::sslv23));
         ssl_contexts_.back()->set_options(
                           asio::ssl::context::default_workarounds
@@ -43,12 +43,12 @@ public:
         ssl_contexts_.back()->use_certificate_chain_file(ssl_cert_file);
         ssl_contexts_.back()->use_private_key_file(ssl_key_file, asio::ssl::context::pem);
         ssl_contexts_.back()->use_tmp_dh_file(ssl_dh_file);
-        auto tcp_port = std::make_shared<TcpPort<SenderFramingType, ReceiverFramingType>>(thread_pool_->get_io_context(), port_number, connection_context, ssl_contexts_.back().get());
+        auto tcp_port = std::make_shared<TcpPort>(thread_pool_->get_io_context(), port_number, connection_context, ssl_contexts_.back().get());
         ports_.push_back(tcp_port);
     }
 
     template< typename SenderFramingType, typename ReceiverFramingType>
-    void addUdpPort(unsigned short port_number, SessionContext<NetworkSession<SenderFramingType, ReceiverFramingType>, SenderFramingType, ReceiverFramingType>& connection_context) {
+    void addUdpPort(unsigned short port_number, std::shared_ptr<SessionContext>& connection_context) {
         auto udp_port = std::make_shared<UdpPort<SenderFramingType, ReceiverFramingType>>(thread_pool_->get_io_context(), port_number,connection_context);
         ports_.push_back(udp_port);
     }

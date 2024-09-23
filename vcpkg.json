@@ -1,8 +1,6 @@
 {
-  "dependencies": [
-    "asio",
-    "nlohmann-json",
-    "openssl",
-    "curl"
-  ]
+  "dependencies" : [ "asio", "nlohmann-json", "openssl", "curl", "nghttp2", {
+    "name" : "pkgconf",
+    "version>=" : "2.3.0"
+  } ]
 }

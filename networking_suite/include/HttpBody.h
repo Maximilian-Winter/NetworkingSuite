@@ -20,7 +20,9 @@ public:
     const std::vector<uint8_t>& getContent() const {
         return content_;
     }
-
+    const std::string getStrContent() const {
+        return reinterpret_cast<const char*>(content_.data());
+    }
     size_t getSize() const {
         return content_.size();
     }

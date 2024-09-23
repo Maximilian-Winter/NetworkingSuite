@@ -20,6 +20,10 @@ public:
         return (it != fields_.end()) ? it->second : "";
     }
 
+    std::unordered_map<std::string, std::string >getFields() const {
+        return fields_;
+    }
+
     bool hasField(const std::string& name) const {
         return fields_.find(name) != fields_.end();
     }
