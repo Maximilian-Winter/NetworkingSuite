@@ -73,6 +73,88 @@ std::string percent_decode(const std::string &value)
     return result;
 }
 
+
+class DataStream {
+public:
+    virtual ~DataStream() = default;
+    virtual ssize_t read(uint8_t* buf, size_t length, uint32_t* data_flags) = 0;
+};
+
+class FileDataStream : public DataStream {
+public:
+    explicit FileDataStream(const std::string& filename)
+        : file_(filename, std::ios::binary)
+    {
+        if (!file_) {
+            throw std::runtime_error("Failed to open file: " + filename);
+        }
+    }
+
+    ssize_t read(uint8_t* buf, size_t length, uint32_t* data_flags) override {
+        file_.read(reinterpret_cast<char*>(buf), length);
+        ssize_t n = file_.gcount();
+        if (file_.eof()) {
+            *data_flags |= NGHTTP2_DATA_FLAG_EOF;
+        }
+        return n;
+    }
+
+private:
+    std::ifstream file_;
+};
+
+class StringDataStream : public DataStream {
+public:
+    explicit StringDataStream(std::string data)
+        : data_(std::move(data)), offset_(0)
+    {}
+
+    ssize_t read(uint8_t* buf, size_t length, uint32_t* data_flags) override {
+        size_t remaining = data_.size() - offset_;
+        size_t n = std::min(length, remaining);
+        if (n > 0) {
+            memcpy(buf, data_.data() + offset_, n);
+            offset_ += n;
+        }
+        if (offset_ >= data_.size()) {
+            *data_flags |= NGHTTP2_DATA_FLAG_EOF;
+        }
+        return n;
+    }
+
+private:
+    std::string data_;
+    size_t offset_;
+};
+
+class Http2Stream {
+public:
+    Http2Stream(int32_t stream_id, std::string request_path)
+        : stream_id_(stream_id), request_path_(std::move(request_path))
+    {}
+
+    [[nodiscard]] int32_t getStreamId() const { return stream_id_; }
+    [[nodiscard]] const std::string& getRequestPath() const { return request_path_; }
+
+    void setRequestPath(const std::string& path) {
+        request_path_ = path;
+    }
+
+    void setDataStream(std::shared_ptr<DataStream> data_stream) {
+        data_stream_ = std::move(data_stream);
+    }
+
+    [[nodiscard]] std::shared_ptr<DataStream> getDataStream() const {
+        return data_stream_;
+    }
+
+private:
+    int32_t stream_id_;
+    std::string request_path_;
+    std::shared_ptr<DataStream> data_stream_;
+};
+
+
 class Http2Session : public std::enable_shared_from_this<Http2Session>
 {
 public:
@@ -104,7 +186,7 @@ private:
     std::shared_ptr<asio::ssl::stream<asio::ip::tcp::socket> > socket_;
     nghttp2_session *session_ = nullptr;
     std::vector<uint8_t> read_buffer_;
-    std::map<int32_t, std::shared_ptr<Stream> > streams_;
+    std::map<int32_t, std::shared_ptr<Http2Stream>> streams_;
     std::mutex streams_mutex_;
     asio::strand<asio::io_context::executor_type> strand_;
     std::vector<uint8_t> output_buffer_;
@@ -366,52 +448,42 @@ private:
     }
 
     int on_header(const nghttp2_frame *frame, const uint8_t *name, size_t namelen,
-                  const uint8_t *value, size_t valuelen, uint8_t flags)
+              const uint8_t *value, size_t valuelen, uint8_t flags)
     {
-        DEBUG_LOG("on_header");
-        switch (frame->hd.type)
+        if (frame->hd.type == NGHTTP2_HEADERS &&
+            frame->headers.cat == NGHTTP2_HCAT_REQUEST)
         {
-            case NGHTTP2_HEADERS:
-                if (frame->headers.cat != NGHTTP2_HCAT_REQUEST)
+            if (namelen == 5 && memcmp(":path", name, namelen) == 0)
+            {
+                std::lock_guard<std::mutex> lock(streams_mutex_);
+                auto it = streams_.find(frame->hd.stream_id);
+                if (it != streams_.end())
                 {
-                    break;
+                    it->second->setRequestPath(
+                        std::string(reinterpret_cast<const char *>(value), valuelen));
                 }
-                if (namelen == 5 && memcmp(":path", name, namelen) == 0)
-                {
-                    std::lock_guard<std::mutex> lock(streams_mutex_);
-                    auto it = streams_.find(frame->hd.stream_id);
-                    if (it != streams_.end())
-                    {
-                        it->second->request_path = std::string(reinterpret_cast<const char *>(value), valuelen);
-                    }
-                }
-                break;
-            default:
-                break;;
+            }
         }
-        DEBUG_LOG("End of on_header");
         return 0;
     }
 
     int on_begin_headers(const nghttp2_frame *frame)
     {
-        DEBUG_LOG("on_begin_headers");
         if (frame->hd.type == NGHTTP2_HEADERS &&
             frame->headers.cat == NGHTTP2_HCAT_REQUEST)
         {
             std::lock_guard<std::mutex> lock(streams_mutex_);
-            auto stream = std::make_shared<Stream>();
-            stream->stream_id = frame->hd.stream_id;
+            auto stream = std::make_shared<Http2Stream>(frame->hd.stream_id, "");
             streams_[frame->hd.stream_id] = stream;
         }
-        DEBUG_LOG("End of on_begin_headers");
         return 0;
     }
 
 
+
     int on_request_recv(int32_t stream_id)
     {
-        std::shared_ptr<Stream> stream;
+        std::shared_ptr<Http2Stream> stream;
         {
             std::lock_guard<std::mutex> lock(streams_mutex_);
             auto it = streams_.find(stream_id);
@@ -422,10 +494,10 @@ private:
             stream = it->second;
         }
 
-        std::cout << "Received request for: " << stream->request_path << std::endl;
+        std::cout << "Received request for: " << stream->getRequestPath() << std::endl;
 
         // Decode the path
-        std::string decoded_path = percent_decode(stream->request_path);
+        std::string decoded_path = percent_decode(stream->getRequestPath());
 
         // Check path security
         if (!check_path(decoded_path))
@@ -435,11 +507,11 @@ private:
         }
 
         std::string file_path = "." + decoded_path;
-        stream->response_file.open(file_path, std::ios::binary);
-
-        if (!stream->response_file)
-        {
-            std::cerr << "Failed to open file: " << file_path << std::endl;
+        try {
+            auto data_stream = std::make_shared<FileDataStream>(file_path);
+            stream->setDataStream(data_stream);
+        } catch (const std::exception& e) {
+            std::cerr << e.what() << std::endl;
             return error_reply(stream_id);
         }
 
@@ -447,14 +519,21 @@ private:
             MAKE_NV(":status", "200")
         };
 
-        nghttp2_data_provider2 data_prd;
+        nghttp2_data_provider data_prd;
         data_prd.source.ptr = stream.get();
-        data_prd.read_callback = file_read_callback;
+        data_prd.read_callback = [](nghttp2_session *session, int32_t stream_id,
+                                    uint8_t *buf, size_t length, uint32_t *data_flags,
+                                    nghttp2_data_source *source, void *user_data) -> ssize_t
+        {
+            auto stream = static_cast<Http2Stream *>(source->ptr);
+            auto data_stream = stream->getDataStream();
+            return data_stream->read(buf, length, data_flags);
+        };
 
-        int rv = nghttp2_submit_response2(session_, stream_id, hdrs, 1, &data_prd);
+        int rv = nghttp2_submit_response(session_, stream_id, hdrs, 1, &data_prd);
         if (rv != 0)
         {
-            std::cerr << "nghttp2_submit_response2 error: " << nghttp2_strerror(rv) << std::endl;
+            std::cerr << "nghttp2_submit_response error: " << nghttp2_strerror(rv) << std::endl;
             return -1;
         }
         return session_send();
@@ -462,56 +541,33 @@ private:
 
     int error_reply(int32_t stream_id)
     {
-        DEBUG_LOG("error_reply");
         static const std::string ERROR_HTML = "<html><body><h1>404</h1></body></html>";
 
-        auto stream = std::make_shared<Stream>();
-        stream->stream_id = stream_id;
+        auto stream = std::make_shared<Http2Stream>(stream_id, "");
         streams_[stream_id] = stream;
+
+        auto data_stream = std::make_shared<StringDataStream>(ERROR_HTML);
+        stream->setDataStream(data_stream);
 
         const nghttp2_nv hdrs[] = {
             MAKE_NV(":status", "404")
         };
 
-        nghttp2_data_provider2 data_prd;
-        data_prd.source.ptr = new std::string(ERROR_HTML);
-        data_prd.read_callback =
-                [](nghttp2_session *session, int32_t stream_id, uint8_t *buf, size_t length,
-                   uint32_t *data_flags, nghttp2_data_source *source, void *user_data) -> ssize_t
-                {
-                    auto data = static_cast<std::string *>(source->ptr);
-                    if (data->empty())
-                    {
-                        *data_flags |= NGHTTP2_DATA_FLAG_EOF;
-                        delete data;
-                        return 0;
-                    }
-                    size_t n = std::min(length, data->size());
-                    memcpy(buf, data->data(), n);
-                    data->erase(0, n);
-                    return n;
-                };
+        nghttp2_data_provider data_prd;
+        data_prd.source.ptr = stream.get();
+        data_prd.read_callback = [](nghttp2_session *session, int32_t stream_id,
+                                    uint8_t *buf, size_t length, uint32_t *data_flags,
+                                    nghttp2_data_source *source, void *user_data) -> ssize_t
+        {
+            auto stream = static_cast<Http2Stream *>(source->ptr);
+            auto data_stream = stream->getDataStream();
+            return data_stream->read(buf, length, data_flags);
+        };
 
-        nghttp2_submit_response2(session_, stream_id, hdrs, 1, &data_prd);
-        DEBUG_LOG("End of error_reply");
+        nghttp2_submit_response(session_, stream_id, hdrs, 1, &data_prd);
         return session_send();
     }
 
-    static ssize_t file_read_callback(nghttp2_session *session, int32_t stream_id,
-                                      uint8_t *buf, size_t length, uint32_t *data_flags,
-                                      nghttp2_data_source *source, void *user_data)
-    {
-        DEBUG_LOG("file_read_callback");
-        auto stream = static_cast<Stream *>(source->ptr);
-        stream->response_file.read(reinterpret_cast<char *>(buf), length);
-        ssize_t n = stream->response_file.gcount();
-        if (stream->response_file.eof())
-        {
-            *data_flags |= NGHTTP2_DATA_FLAG_EOF;
-        }
-        DEBUG_LOG("End of file_read_callback");
-        return n;
-    }
 };
 
 class Http2Server
