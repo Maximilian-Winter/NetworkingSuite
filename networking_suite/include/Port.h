@@ -45,8 +45,8 @@ protected:
 class TcpPort final : public Port
 {
 public:
-    TcpPort(asio::io_context &io_context, unsigned short port_number, std::shared_ptr<SessionContext> connection_context, asio::ssl::context* ssl_context = nullptr)
-        : Port(io_context, port_number, Protocol::TCP), connection_context_(std::move(connection_context)),
+    TcpPort(asio::io_context &io_context, unsigned short port_number, const std::shared_ptr<SessionContextTemplate> &connection_context_template, asio::ssl::context* ssl_context = nullptr)
+        : Port(io_context, port_number, Protocol::TCP), connection_context_template_(connection_context_template),
           acceptor_(io_context, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port_number)), ssl_context_(ssl_context)
     {
     }
@@ -71,7 +71,7 @@ private:
                 if (!ec)
                 {
                     auto session = std::make_shared<NetworkSession>(io_context_, std::move(socket), ssl_context_);
-                    session->start(connection_context_);
+                    session->start(connection_context_template_);
 
                     {
                         std::lock_guard lock(user_mutex);
@@ -83,7 +83,7 @@ private:
     }
     asio::ssl::context* ssl_context_{};
     asio::ip::tcp::acceptor acceptor_;
-    std::shared_ptr<SessionContext> connection_context_;
+    std::shared_ptr<SessionContextTemplate> connection_context_template_;
     std::mutex user_mutex;
     std::unordered_map<std::string, std::shared_ptr<NetworkSession>> connected_users_;
 };
@@ -91,10 +91,10 @@ private:
 class UdpPort final : public Port
 {
 public:
-    UdpPort(asio::io_context &io_context, unsigned short port_number, std::shared_ptr<SessionContext> connection_context)
+    UdpPort(asio::io_context &io_context, unsigned short port_number, const std::shared_ptr<SessionContextTemplate> &connection_context_template)
         : Port(io_context, port_number, Protocol::UDP),
           socket_(io_context, asio::ip::udp::endpoint(asio::ip::udp::v4(), port_number)),
-            connection_context_(std::move(connection_context))
+            connection_context_template_(connection_context_template)
     {
     }
 
@@ -121,11 +121,12 @@ private:
                 if (!ec)
                 {
                     receive_buffer->resize(bytes_recvd);
-                    if (connection_context_->check_message_state(*receive_buffer) == MessageState::FINISHED)
+                    std::unique_ptr<SessionContext> connection_context_ = connection_context_template_->create_instance();
+                    if (connection_context_->check_message_state(*receive_buffer) == MessageState::VALID)
                     {
                         auto message = connection_context_->extract_message(*receive_buffer);
                         auto connection = std::make_shared<NetworkSession>(io_context_, sender_endpoint_);
-                            connection->start(connection_context_);
+                            connection->start(connection_context_template_);
                             {
                                 std::lock_guard lock(user_mutex);
                                 connected_users_[connection->getSessionUuid()] = connection;
@@ -142,7 +143,7 @@ private:
     std::mutex user_mutex;
     asio::ip::udp::socket socket_;
     asio::ip::udp::endpoint sender_endpoint_;
-    std::shared_ptr<SessionContext> connection_context_;
+    std::shared_ptr<SessionContextTemplate> connection_context_template_;
     std::unordered_map<std::string, std::shared_ptr<NetworkSession>> connected_users_;
     static constexpr std::size_t buffer_size = 65536;
 };

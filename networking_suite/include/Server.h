@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <Logger.h>
 #include <utility>
 #include <vector>
 #include <memory>
@@ -28,22 +29,24 @@ public:
         logger.addDestination(std::make_shared<AsyncLogger::FileDestination>(log_file, log_file_size_in_mb * (1024 * 1024)));
     }
 
-    void addTcpPort(unsigned short port_number, std::shared_ptr<SessionContext> connection_context) {
-        auto tcp_port = std::make_shared<TcpPort>(thread_pool_->get_io_context(), port_number, connection_context);
+    void addTcpPort(unsigned short port_number, const std::shared_ptr<SessionContextTemplate>& connection_context_template) {
+        auto tcp_port = std::make_shared<TcpPort>(thread_pool_->get_io_context(), port_number, connection_context_template);
         ports_.push_back(tcp_port);
     }
 
 
-    void addSslTcpPort(unsigned short port_number, const std::string& ssl_cert_file, const std::string& ssl_key_file, const std::string& ssl_dh_file, std::shared_ptr<SessionContext> connection_context) {
-        ssl_contexts_.emplace_back(std::make_shared<asio::ssl::context>(asio::ssl::context::sslv23));
+    void addSslTcpPort(unsigned short port_number, const std::string& ssl_cert_file, const std::string& ssl_key_file, const std::string& ssl_dh_file, std::shared_ptr<SessionContextTemplate> connection_context_template) {
+        ssl_contexts_.emplace_back(std::make_shared<asio::ssl::context>(asio::ssl::context::tls));
         ssl_contexts_.back()->set_options(
-                          asio::ssl::context::default_workarounds
-                          | asio::ssl::context::no_sslv2
+                        asio::ssl::context::default_workarounds
+                        | asio::ssl::context::no_sslv2
+                        | asio::ssl::context::no_sslv3
                           | asio::ssl::context::single_dh_use);
         ssl_contexts_.back()->use_certificate_chain_file(ssl_cert_file);
         ssl_contexts_.back()->use_private_key_file(ssl_key_file, asio::ssl::context::pem);
-        ssl_contexts_.back()->use_tmp_dh_file(ssl_dh_file);
-        auto tcp_port = std::make_shared<TcpPort>(thread_pool_->get_io_context(), port_number, connection_context, ssl_contexts_.back().get());
+        SSL_CTX_set_alpn_select_cb(ssl_contexts_.back()->native_handle(), alpn_select_proto_cb, nullptr);
+        //ssl_contexts_.back()->use_tmp_dh_file(ssl_dh_file);
+        auto tcp_port = std::make_shared<TcpPort>(thread_pool_->get_io_context(), port_number, connection_context_template, ssl_contexts_.back().get());
         ports_.push_back(tcp_port);
     }
 
@@ -68,7 +71,17 @@ public:
     }
 
 private:
-
+    static int alpn_select_proto_cb(SSL *ssl, const unsigned char **out,
+                                        unsigned char *outlen, const unsigned char *in,
+                                        unsigned int inlen, void *arg)
+    {
+        int rv = nghttp2_select_next_protocol((unsigned char **) out, outlen, in, inlen);
+        if (rv != 1)
+        {
+            return SSL_TLSEXT_ERR_NOACK;
+        }
+        return SSL_TLSEXT_ERR_OK;
+    }
     std::vector<std::shared_ptr<asio::ssl::context>> ssl_contexts_;
     std::shared_ptr<AsioThreadPool> thread_pool_;
     std::vector<std::shared_ptr<Port>> ports_;

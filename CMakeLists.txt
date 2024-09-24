@@ -35,6 +35,8 @@ include_directories(${ASIO_INCLUDE_DIR} ${OPENSSL_INCLUDE_DIR} ${nlohmann_json_I
 # Print Asio include path for debugging
 message(STATUS "Asio include path: ${ASIO_INCLUDE_DIR}")
 
+
+
 # Common compile options and link libraries
 set(COMMON_COMPILE_OPTIONS
         -Wall
@@ -49,10 +51,12 @@ set(COMMON_LINK_LIBRARIES
         ${NGHTTP2_LIBRARIES}  # Add nghttp2 libraries
 )
 
+add_subdirectory(networking_suite)
+
 # Function to add common settings to targets
 function(add_common_settings target)
     target_compile_options(${target} PRIVATE ${COMMON_COMPILE_OPTIONS})
-    target_link_libraries(${target} PRIVATE ${COMMON_LINK_LIBRARIES})
+    target_link_libraries(${target} PRIVATE ${COMMON_LINK_LIBRARIES} networking_suite)
     target_include_directories(${target} PRIVATE
             ${ASIO_INCLUDE_DIR}
             ${OPENSSL_INCLUDE_DIR}
@@ -65,6 +69,7 @@ function(add_common_settings target)
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     )
 endfunction()
+
 
 add_subdirectory(examples/echo_server_example)
 add_subdirectory(examples/http_server_example)

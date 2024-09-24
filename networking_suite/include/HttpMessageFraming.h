@@ -10,49 +10,22 @@ class HttpMessageFraming final : public MessageFraming {
 public:
     HttpMessageFraming() : error_state_(false) {}
 
-    [[nodiscard]] ByteVector frameMessage(const ByteVector& message) override {
+    [[nodiscard]] ByteVector frame_message(const ByteVector& message) override {
         return message;
     }
 
-   ByteVector process_next_message(ByteVector& buffer) override {
+   ByteVector extract_next_message(ByteVector& buffer) override {
 
         auto result = extractSingleMessage(buffer);
-
-
         return result;
     }
 
-    [[nodiscard]] bool hasCompleteMessage(const ByteVector& buffer) const override {
-        return findMessageBoundary(buffer) != std::string::npos;
+    [[nodiscard]] MessageState check_message_state(const ByteVector &buffer) const override
+    {
+        return HttpParser::isValidHttpMessage(buffer) ? MessageState::VALID : MessageState::INVALID;
     }
-
-    [[nodiscard]] size_t getBytesNeededForNextMessage(const ByteVector& buffer) const override {
-        size_t headerEnd = findMessageBoundary(buffer);
-        if (headerEnd == std::string::npos) {
-            return 1;  // Need at least one more byte
-        }
-
-        size_t contentLength = parseContentLength(buffer, headerEnd);
-        size_t totalLength = headerEnd + 4 + contentLength;  // 4 for "\r\n\r\n"
-
-        return (totalLength > buffer.size()) ? (totalLength - buffer.size()) : 0;
-    }
-
-    void reset() override {
-        error_state_ = false;
-        error_message_.clear();
-    }
-
-    [[nodiscard]] bool isInErrorState() const override {
-        return error_state_;
-    }
-
-    [[nodiscard]] std::string getErrorMessage() const override {
-        return error_message_;
-    }
-
 protected:
-    ByteVector extractSingleMessage(ByteVector& buffer) override {
+    ByteVector extractSingleMessage(ByteVector& buffer) {
         size_t headerEnd = findMessageBoundary(buffer);
         if (headerEnd == std::string::npos) {
             return {};  // No complete message found
@@ -98,4 +71,6 @@ private:
         }
         return 0;  // No Content-Length header or invalid format
     }
+
+
 };

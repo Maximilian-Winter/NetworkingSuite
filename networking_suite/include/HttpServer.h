@@ -58,15 +58,35 @@ public:
     };
 
     explicit HttpServer(const std::string& config_file)
-        : message_framing_(), ssl_message_framing_(), config_(std::make_shared<Config>())
+        : message_framing_(), config_(std::make_shared<Config>())
     {
         config_->load(config_file);
 
         auto thread_count = config_->get<unsigned int>("thread_count", 4);
         thread_pool_ = std::make_shared<AsioThreadPool>(thread_count);
         server_ = std::make_unique<Server>(thread_pool_, *config_);
-        tcp_handler_ = std::make_shared<DefaultSessionContext>();
-        ssl_handler_ = std::make_shared<DefaultSessionContext>();
+
+        session_context_template_ = std::make_shared<SessionContextTemplate>();
+        session_context_template_->set_http2(true);
+        session_context_template_->set_write_preprocessor([this](const ByteVector& message)
+        {
+            return message_framing_.frame_message(message);
+        });
+
+        session_context_template_->set_read_postprocessor([this](ByteVector& message)
+        {
+            return message_framing_.extract_next_message(message);
+        });
+
+        session_context_template_->set_check_message_state([this](const ByteVector& message)
+        {
+            return HttpParser::isValidHttpMessage(message) ? MessageState::VALID : MessageState::INVALID;
+        });
+
+        session_context_template_->set_message_handler([this](const std::shared_ptr<NetworkSession>& session, const ByteVector& data) {
+            handleHTTPRequest(session, data);
+        });
+
         setupHTTPServer();
         setupHTTPSServer();
 
@@ -92,29 +112,14 @@ public:
 private:
 
 
-    void setupHTTPServer() {
+    void setupHTTPServer() const
+    {
         auto http_port = config_->get<unsigned short>("http_port", 80);
-        tcp_handler_->set_write_preprocessor([this](const ByteVector& message)
-        {
-            return message_framing_.frameMessage(message);
-        });
-        tcp_handler_->set_read_postprocessor([this](ByteVector& message)
-        {
-            return message_framing_.process_next_message(message);
-        });
-
-        tcp_handler_->set_message_check([this](const ByteVector& message)
-        {
-            return HttpParser::isValidHttpMessage(message) ? MessageState::FINISHED : MessageState::INVALID;
-        });
-        tcp_handler_->set_message_handler([this](const std::shared_ptr<NetworkSession>& session, const ByteVector& data) {
-            handleHTTPRequest(session, data);
-        });
-
-        server_->addTcpPort(http_port, tcp_handler_);
+        server_->addTcpPort(http_port, session_context_template_);
     }
 
-    void setupHTTPSServer() {
+    void setupHTTPSServer() const
+    {
         auto https_port = config_->get<unsigned short>("https_port", 443);
         auto ssl_cert = config_->get<std::string>("ssl_cert_file", "");
         auto ssl_key = config_->get<std::string>("ssl_key_file", "");
@@ -124,24 +129,8 @@ private:
             std::cout << "SSL configuration is incomplete. HTTPS server will not be started." << std::endl;
             return;
         }
-        ssl_handler_->set_write_preprocessor([this](const ByteVector& message)
-        {
-            return message_framing_.frameMessage(message);
-        });
-        ssl_handler_->set_read_postprocessor([this](ByteVector& message)
-        {
-            return message_framing_.process_next_message(message);
-        });
 
-         ssl_handler_->set_message_check([this](const ByteVector& message)
-        {
-            return HttpParser::isValidHttpMessage(message) ? MessageState::FINISHED : MessageState::INVALID;
-        });
-        ssl_handler_->set_message_handler([this](const std::shared_ptr<NetworkSession>& session, const ByteVector& data) {
-            handleHTTPRequest(session, data);
-        });
-
-        server_->addSslTcpPort(https_port, ssl_cert, ssl_key, ssl_dh_file, ssl_handler_);
+        server_->addSslTcpPort(https_port, ssl_cert, ssl_key, ssl_dh_file, session_context_template_);
     }
 
 
@@ -235,12 +224,8 @@ private:
         execute_next(0);
     }
 
-    std::shared_ptr<DefaultSessionContext> tcp_handler_;
+    std::shared_ptr<SessionContextTemplate> session_context_template_;
     HttpMessageFraming message_framing_;
-    HttpMessageFraming message_framing_2;
-    std::shared_ptr<DefaultSessionContext> ssl_handler_;
-    HttpMessageFraming ssl_message_framing_;
-    HttpMessageFraming ssl_message_framing_2;
     std::shared_ptr<Config> config_;
     std::shared_ptr<AsioThreadPool> thread_pool_;
     std::unique_ptr<Server> server_;
