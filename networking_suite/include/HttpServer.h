@@ -33,6 +33,38 @@ public:
 
 
 
+class Router {
+public:
+    using RequestHandler = std::function<void(RouteContext& route_context, const HttpRequest& request, HttpResponse& response)>;
+
+    struct Route {
+        std::string pattern;
+        std::regex regex;
+        RequestHandler handler;
+        std::vector<std::shared_ptr<Middleware>> pre_middlewares;
+        std::vector<std::shared_ptr<Middleware>> post_middlewares;
+    };
+
+    std::shared_ptr<Route> addRoute(const std::string& path, const RequestHandler& handler) {
+        const std::string pattern = path + "(\\?.*)?$";
+        routes_.push_back(std::make_shared<Route>(Route{path, std::regex(pattern), handler}));
+        return routes_.back();
+    }
+
+    [[nodiscard]] std::optional<std::shared_ptr<Route>> findRoute(const std::string& path) const {
+        for (const auto& route : routes_) {
+            if (std::regex_match(path, route->regex)) {
+                return route;
+            }
+        }
+        return std::nullopt;
+    }
+
+private:
+    std::vector<std::shared_ptr<Route>> routes_;
+};
+
+
 class HttpServer {
 public:
     class HttpRoute {
