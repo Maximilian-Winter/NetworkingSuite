@@ -53,7 +53,8 @@ private:
     asio::ip::udp::endpoint udp_endpoint_;
     asio::ip::udp::resolver udp_resolver_;
     asio::ssl::context *ssl_context_;
-
+    ByteVector bulk_send_buffer_;
+    std::atomic<bool> is_bulk_sending_{false};
 public:
     // Constructor for new connections
     explicit NetworkSession(asio::io_context &io_context, ProtocolType protocol_type,
@@ -90,12 +91,12 @@ public:
 
     std::string getSessionUuid() const;
 
-    void write(const ByteVector &message);
+    void write(const ByteVector &message, bool send_all_data_at_once_in_order_added = false, bool write_immediately = false);
 
     void close();
 
 private:
-    void do_ssl_handshake(const std::string &hostname);
+    void do_ssl_handshake(const std::string &hostname, const std::shared_ptr<SessionContextTemplate>& context_template);
 
     void do_read();
 
@@ -103,7 +104,7 @@ private:
 
     void process_read_data(const ByteVector &new_data);
 
-    void do_write();
+    void do_write(bool send_all_data_at_once_in_order_added = false);
 
     void do_send();
 

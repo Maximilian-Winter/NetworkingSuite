@@ -20,7 +20,7 @@ public:
     {
         //auto port = config_.get<short>("port", 8080);
         std::string defaultLevel = "INFO";
-        auto log_level = config_.get<std::string>("log_level", "INFO");
+        auto log_level = config_.get<std::string>("log_level", "DEBUG");
         auto log_file = config_.get<std::string>("log_file", "client.log");
         auto log_file_size_in_mb = config_.get<float>("max_log_file_size_in_mb", 1.0f);
         AsyncLogger& logger = AsyncLogger::getInstance();

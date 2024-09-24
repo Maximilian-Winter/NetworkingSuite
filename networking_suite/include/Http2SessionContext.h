@@ -15,6 +15,7 @@
 #include <fstream>
 
 #include <asio.hpp>
+#include <Logger.h>
 #include <asio/ssl.hpp>
 #include <nghttp2/nghttp2.h>
 #include <openssl/err.h>
@@ -211,6 +212,7 @@ private:
 
     void initialize_nghttp2_session()
     {
+        LOG_DEBUG("Initialize nghttp2_session");
         nghttp2_session_callbacks *callbacks;
         nghttp2_session_callbacks_new(&callbacks);
 
@@ -218,6 +220,7 @@ private:
                                                               [](nghttp2_session *session, const nghttp2_frame_hd *hd,
                                                                  void *user_data) -> int
                                                               {
+                                                                  LOG_DEBUG("nghttp2_session_callbacks_set_on_begin_frame");
                                                                   auto self = static_cast<Http2SessionContext *>(
                                                                       user_data);
                                                                   return self->on_begin_frame(hd);
@@ -227,6 +230,7 @@ private:
                                                      [](nghttp2_session *session, const uint8_t *data, size_t length,
                                                         int flags, void *user_data) -> ssize_t
                                                      {
+                                                         LOG_DEBUG("nghttp2_session_callbacks_set_send_callback2");
                                                          auto self = static_cast<Http2SessionContext *>(user_data);
                                                          return self->send_callback(data, length);
                                                      });
@@ -235,6 +239,7 @@ private:
                                                              [](nghttp2_session *session, const nghttp2_frame *frame,
                                                                 void *user_data) -> int
                                                              {
+                                                                 LOG_DEBUG("nghttp2_session_callbacks_set_on_frame_recv_callback");
                                                                  auto self = static_cast<Http2SessionContext *>(
                                                                      user_data);
                                                                  return self->on_frame_recv(frame);
@@ -244,6 +249,7 @@ private:
                                                                [](nghttp2_session *session, int32_t stream_id,
                                                                   uint32_t error_code, void *user_data) -> int
                                                                {
+                                                                   LOG_DEBUG("nghttp2_session_callbacks_set_on_stream_close_callback");
                                                                    auto self = static_cast<Http2SessionContext *>(
                                                                        user_data);
                                                                    return self->on_stream_close(stream_id, error_code);
@@ -255,6 +261,7 @@ private:
                                                             const uint8_t *value, size_t valuelen,
                                                             uint8_t flags, void *user_data) -> int
                                                          {
+                                                             LOG_DEBUG("nghttp2_session_callbacks_set_on_header_callback");
                                                              auto self = static_cast<Http2SessionContext *>(user_data);
                                                              return self->on_header(
                                                                  frame, name, namelen, value, valuelen, flags);
@@ -264,6 +271,7 @@ private:
                                                                 [](nghttp2_session *session, const nghttp2_frame *frame,
                                                                    void *user_data) -> int
                                                                 {
+                                                                    LOG_DEBUG("nghttp2_session_callbacks_set_on_begin_headers_callback");
                                                                     auto self = static_cast<Http2SessionContext *>(
                                                                         user_data);
                                                                     return self->on_begin_headers(frame);
@@ -276,6 +284,7 @@ private:
 
     int on_begin_frame(const nghttp2_frame_hd *hd) const
     {
+        LOG_DEBUG("on_begin_frame");
         if (hd->type == NGHTTP2_SETTINGS && hd->flags & NGHTTP2_FLAG_ACK)
         {
             const unsigned char *alpn = nullptr;
@@ -296,6 +305,7 @@ private:
 
     int session_send()
     {
+        LOG_DEBUG("session_send");
         int rv = nghttp2_session_send(session_);
         if (rv != 0)
         {
@@ -312,12 +322,14 @@ private:
 
     ssize_t send_callback(const uint8_t *data, size_t length)
     {
-        std::shared_ptr(network_session_)->write(ByteVector(data, data + length));
+        LOG_DEBUG("send_callback");
+        std::shared_ptr(network_session_)->write(ByteVector(data, data + length), true);
         return static_cast<ssize_t>(length);
     }
 
     int on_frame_recv(const nghttp2_frame *frame)
     {
+        LOG_DEBUG("on_frame_recv");
         switch (frame->hd.type)
         {
             case NGHTTP2_DATA:
@@ -335,6 +347,7 @@ private:
 
     int on_stream_close(int32_t stream_id, uint32_t error_code)
     {
+        LOG_DEBUG("on_stream_close");
         std::lock_guard<std::mutex> lock(streams_mutex_);
         streams_.erase(stream_id);
         return 0;
@@ -343,6 +356,7 @@ private:
     int on_header(const nghttp2_frame *frame, const uint8_t *name, size_t namelen,
                   const uint8_t *value, size_t valuelen, uint8_t flags)
     {
+        LOG_DEBUG("on_header");
         if (frame->hd.type == NGHTTP2_HEADERS &&
             frame->headers.cat == NGHTTP2_HCAT_REQUEST)
         {
@@ -362,6 +376,7 @@ private:
 
     int on_begin_headers(const nghttp2_frame *frame)
     {
+        LOG_DEBUG("on_begin_headers");
         if (frame->hd.type == NGHTTP2_HEADERS &&
             frame->headers.cat == NGHTTP2_HCAT_REQUEST)
         {
@@ -374,6 +389,7 @@ private:
 
     int on_request_recv(int32_t stream_id)
     {
+        LOG_DEBUG("on_request_recv");
         std::shared_ptr<Http2Stream> stream;
         {
             std::lock_guard<std::mutex> lock(streams_mutex_);
@@ -434,6 +450,7 @@ private:
 
     void send_connection_header()
     {
+        LOG_DEBUG("send_connection_header");
         nghttp2_settings_entry iv[2] = {
             {NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS, 100},
             {NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE, 1048576}
@@ -450,6 +467,7 @@ private:
 
     int error_reply(int32_t stream_id)
     {
+        LOG_DEBUG("error_reply");
         static const std::string ERROR_HTML = "<html><body><h1>404</h1></body></html>";
 
         auto stream = std::make_shared<Http2Stream>(stream_id, "");

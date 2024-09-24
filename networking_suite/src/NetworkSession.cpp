@@ -106,7 +106,7 @@ void NetworkSession::start(const std::shared_ptr<SessionContextTemplate> &contex
                     throw std::runtime_error("Failed to set SNI hostname");
                 }
             }
-            do_ssl_handshake(hostname);
+            do_ssl_handshake(hostname, context_template);
         } else
         {
             connection_context_->on_connect();
@@ -139,7 +139,7 @@ std::string NetworkSession::getSessionUuid() const
     return sessionUuid_;
 }
 
-void NetworkSession::write(const ByteVector &message)
+void NetworkSession::write(const ByteVector &message, bool write_immediatly, bool send_all_data_at_once_in_order_added)
 {
     if (is_closed())
     {
@@ -149,20 +149,45 @@ void NetworkSession::write(const ByteVector &message)
     ByteVector *buffer = buffer_pool_->acquire();
     *buffer = connection_context_->write_preprocess(message);
 
-    asio::post(strand_, [this, buffer]()
+    if (write_immediatly)
     {
-        write_queue_.push(buffer);
-        if (write_queue_.size() == 1)
+        if (is_ssl_)
         {
-            if (protocol_type_ == ProtocolType::TCP)
-            {
-                do_write();
-            } else
-            {
-                do_send();
-            }
+            asio::write(*ssl_stream_, asio::buffer(*buffer));
+        } else
+        {
+            asio::write(std::get<asio::ip::tcp::socket>(socket_), asio::buffer(*buffer));
         }
-    });
+        buffer_pool_->release(buffer);
+    }
+    asio::post(strand_, [this, buffer, send_all_data_at_once_in_order_added]()
+        {
+            if (send_all_data_at_once_in_order_added)
+            {
+                bulk_send_buffer_.insert(bulk_send_buffer_.end(), buffer->begin(), buffer->end());
+                buffer_pool_->release(buffer);
+
+                if (!is_bulk_sending_.exchange(true))
+                {
+                    do_write(true);
+                }
+            }
+            else
+            {
+                write_queue_.push(buffer);
+                if (write_queue_.size() == 1)
+                {
+                    if (protocol_type_ == ProtocolType::TCP)
+                    {
+                        do_write(false);
+                    }
+                    else
+                    {
+                        do_send();
+                    }
+                }
+            }
+        });
 }
 
 void NetworkSession::close()
@@ -173,11 +198,11 @@ void NetworkSession::close()
     });
 }
 
-void NetworkSession::do_ssl_handshake(const std::string &hostname)
+void NetworkSession::do_ssl_handshake(const std::string &hostname, const std::shared_ptr<SessionContextTemplate>& context_template)
 {
     ssl_stream_->async_handshake(
         session_role_ == SessionRole::SERVER ? asio::ssl::stream_base::server : asio::ssl::stream_base::client,
-        asio::bind_executor(strand_, [this, self = this->shared_from_this(), hostname](const asio::error_code &ec)
+        asio::bind_executor(strand_, [this, self = this->shared_from_this(), hostname, context_template](const asio::error_code &ec)
         {
             if (!ec)
             {
@@ -209,6 +234,7 @@ void NetworkSession::do_ssl_handshake(const std::string &hostname)
                 }
                 connection_context_->on_connect();
                 do_read();
+
             } else
             {
                 LOG_ERROR("SSL handshake failed: %s", ec.message().c_str());
@@ -300,56 +326,105 @@ void NetworkSession::process_read_data(const ByteVector &new_data)
     }
 }
 
-void NetworkSession::do_write()
+void NetworkSession::do_write(bool send_all_data_at_once_in_order_added)
 {
     if (is_closed())
     {
         return;
     }
 
-    auto buffer = write_queue_.pop();
-    if (!buffer)
-    {
-        return;
-    }
+    if (send_all_data_at_once_in_order_added)
+        {
+            if (bulk_send_buffer_.empty())
+            {
+                is_bulk_sending_.store(false);
+                return;
+            }
 
-    auto write_handler = [this, self = this->shared_from_this(), buffer](
-        const asio::error_code &ec, std::size_t bytes_written)
-    {
-        buffer_pool_->release(*buffer);
-        if (connection_context_->has_write_completion_handler())
-        {
-            auto do_write_lambda = [this, self = this->shared_from_this()]()
+            auto write_handler = [this, self = this->shared_from_this()](
+                const asio::error_code &ec, std::size_t bytes_written)
             {
-                do_write();
-            };
-            connection_context_->write_completion_handler(ec, bytes_written, do_write_lambda);
-        } else
-        {
-            if (!ec)
-            {
-                LOG_DEBUG("Wrote %zu bytes", bytes_written);
-                if (!write_queue_.empty())
+                if (!ec)
                 {
-                    do_write();
+                    LOG_DEBUG("Wrote %zu bytes in bulk", bytes_written);
+                    bulk_send_buffer_.clear();
+                    is_bulk_sending_.store(false);
+
+                    // Check if there's more data to send
+                    if (!write_queue_.empty())
+                    {
+                        do_write(false);
+                    }
                 }
-            } else if (ec != asio::error::operation_aborted)
+                else if (ec != asio::error::operation_aborted)
+                {
+                    LOG_DEBUG("Error in bulk write: %s", ec.message().c_str());
+                    connection_context_->on_error(ec, "Bulk write operation failed");
+                    close();
+                }
+            };
+
+            if (is_ssl_)
             {
-                LOG_DEBUG("Error in write: %s", ec.message().c_str());
-                connection_context_->on_error(ec, "Write operation failed");
-                close();
+                asio::async_write(*ssl_stream_, asio::buffer(bulk_send_buffer_),
+                                  asio::bind_executor(strand_, write_handler));
+            }
+            else
+            {
+                asio::async_write(std::get<asio::ip::tcp::socket>(socket_), asio::buffer(bulk_send_buffer_),
+                                  asio::bind_executor(strand_, write_handler));
             }
         }
-    };
+        else
+        {
+            auto buffer = write_queue_.pop();
+            if (!buffer)
+            {
+                return;
+            }
 
-    if (is_ssl_)
-    {
-        asio::async_write(*ssl_stream_, asio::buffer(**buffer), asio::bind_executor(strand_, write_handler));
-    } else
-    {
-        asio::async_write(std::get<asio::ip::tcp::socket>(socket_), asio::buffer(**buffer),
-                          asio::bind_executor(strand_, write_handler));
-    }
+            auto write_handler = [this, self = this->shared_from_this(), buffer](
+                const asio::error_code &ec, std::size_t bytes_written)
+            {
+                buffer_pool_->release(*buffer);
+                if (connection_context_->has_write_completion_handler())
+                {
+                    auto do_write_lambda = [this, self = this->shared_from_this()]()
+                    {
+                        do_write(false);
+                    };
+                    connection_context_->write_completion_handler(ec, bytes_written, do_write_lambda);
+                }
+                else
+                {
+                    if (!ec)
+                    {
+                        LOG_DEBUG("Wrote %zu bytes", bytes_written);
+                        if (!write_queue_.empty())
+                        {
+                            do_write(false);
+                        }
+                    }
+                    else if (ec != asio::error::operation_aborted)
+                    {
+                        LOG_DEBUG("Error in write: %s", ec.message().c_str());
+                        connection_context_->on_error(ec, "Write operation failed");
+                        close();
+                    }
+                }
+            };
+
+            if (is_ssl_)
+            {
+                asio::async_write(*ssl_stream_, asio::buffer(**buffer),
+                                  asio::bind_executor(strand_, write_handler));
+            }
+            else
+            {
+                asio::async_write(std::get<asio::ip::tcp::socket>(socket_), asio::buffer(**buffer),
+                                  asio::bind_executor(strand_, write_handler));
+            }
+        }
 }
 
 void NetworkSession::do_send()
