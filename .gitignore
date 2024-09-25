@@ -77,3 +77,7 @@ input.mp3
 /examples/http_server_example/server.crt
 /examples/http_server_example/server.csr
 /examples/http_server_example/server.key
+/examples/http_server_example/ca.crt
+/examples/http_server_example/ca.key
+/examples/http_server_example/ca.srl
+/examples/http_server_example/san.cnf

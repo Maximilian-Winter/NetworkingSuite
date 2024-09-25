@@ -2,10 +2,10 @@
 // Created by maxim on 10.09.2024.
 //
 
-// HttpBody.h
 #pragma once
 #include <string>
 #include <vector>
+#include <cstring>
 
 class HttpBody {
 public:
@@ -20,9 +20,11 @@ public:
     const std::vector<uint8_t>& getContent() const {
         return content_;
     }
-    const std::string getStrContent() const {
-        return reinterpret_cast<const char*>(content_.data());
+
+    std::string getStrContent() const {
+        return std::string(reinterpret_cast<const char*>(content_.data()), content_.size());
     }
+
     size_t getSize() const {
         return content_.size();
     }
@@ -30,4 +32,3 @@ public:
 private:
     std::vector<uint8_t> content_;
 };
-

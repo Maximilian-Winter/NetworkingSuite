@@ -90,8 +90,7 @@ void NetworkSession::start(const std::shared_ptr<SessionContextTemplate> &contex
         asio::ip::tcp::no_delay option(true);
         std::get<asio::ip::tcp::socket>(socket_).set_option(option);
     }
-    connection_context_ = context_template->create_instance();
-    connection_context_->set_session(this->weak_from_this());
+
     session_role_ = session_role;
     allow_self_signed_ = allow_self_signed;
 
@@ -109,6 +108,9 @@ void NetworkSession::start(const std::shared_ptr<SessionContextTemplate> &contex
             do_ssl_handshake(hostname, context_template);
         } else
         {
+            context_template->set_http2(false);
+            connection_context_ = context_template->create_instance();
+            connection_context_->set_session(this->weak_from_this());
             connection_context_->on_connect();
             do_read();
         }
@@ -139,7 +141,7 @@ std::string NetworkSession::getSessionUuid() const
     return sessionUuid_;
 }
 
-void NetworkSession::write(const ByteVector &message, bool write_immediatly, bool send_all_data_at_once_in_order_added)
+void NetworkSession::write(const ByteVector &message, bool write_immediatly)
 {
     if (is_closed())
     {
@@ -153,41 +155,30 @@ void NetworkSession::write(const ByteVector &message, bool write_immediatly, boo
     {
         if (is_ssl_)
         {
-            asio::write(*ssl_stream_, asio::buffer(*buffer));
+            int bytes_written = asio::write(*ssl_stream_, asio::buffer(buffer->data(), buffer->size()));
+            LOG_DEBUG("Wrote %zu bytes", bytes_written);
         } else
         {
-            asio::write(std::get<asio::ip::tcp::socket>(socket_), asio::buffer(*buffer));
+            int bytes_written = asio::write(std::get<asio::ip::tcp::socket>(socket_),
+                                            asio::buffer(buffer->data(), buffer->size()));
+            LOG_DEBUG("Wrote %zu bytes", bytes_written);
         }
         buffer_pool_->release(buffer);
     }
-    asio::post(strand_, [this, buffer, send_all_data_at_once_in_order_added]()
+    asio::post(strand_, [this, buffer]()
+    {
+        write_queue_.push(buffer);
+        if (write_queue_.size() == 1)
         {
-            if (send_all_data_at_once_in_order_added)
+            if (protocol_type_ == ProtocolType::TCP)
             {
-                bulk_send_buffer_.insert(bulk_send_buffer_.end(), buffer->begin(), buffer->end());
-                buffer_pool_->release(buffer);
-
-                if (!is_bulk_sending_.exchange(true))
-                {
-                    do_write(true);
-                }
-            }
-            else
+                do_write();
+            } else
             {
-                write_queue_.push(buffer);
-                if (write_queue_.size() == 1)
-                {
-                    if (protocol_type_ == ProtocolType::TCP)
-                    {
-                        do_write(false);
-                    }
-                    else
-                    {
-                        do_send();
-                    }
-                }
+                do_send();
             }
-        });
+        }
+    });
 }
 
 void NetworkSession::close()
@@ -198,53 +189,59 @@ void NetworkSession::close()
     });
 }
 
-void NetworkSession::do_ssl_handshake(const std::string &hostname, const std::shared_ptr<SessionContextTemplate>& context_template)
+void NetworkSession::do_ssl_handshake(const std::string &hostname,
+                                      const std::shared_ptr<SessionContextTemplate> &context_template)
 {
     ssl_stream_->async_handshake(
         session_role_ == SessionRole::SERVER ? asio::ssl::stream_base::server : asio::ssl::stream_base::client,
-        asio::bind_executor(strand_, [this, self = this->shared_from_this(), hostname, context_template](const asio::error_code &ec)
-        {
-            if (!ec)
+        asio::bind_executor(
+            strand_, [this, self = this->shared_from_this(), hostname, context_template](const asio::error_code &ec)
             {
-                if (!hostname.empty())
+                if (!ec)
                 {
-                    if (!SSL_get_peer_certificate(ssl_stream_->native_handle()))
+                    context_template->set_http2(isHttp2Connection());
+                    connection_context_ = context_template->create_instance();
+                    connection_context_->set_session(this->weak_from_this());
+                    if (!hostname.empty())
                     {
-                        LOG_ERROR("No certificate was presented by the server");
-                        connection_context_->on_error(asio::error::no_recovery, "No server certificate");
-                        close();
-                        return;
-                    }
-                    long verify_result = SSL_get_verify_result(ssl_stream_->native_handle());
-                    if (verify_result != X509_V_OK)
-                    {
-                        if (!(allow_self_signed_ && verify_result == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT))
+                        if (!SSL_get_peer_certificate(ssl_stream_->native_handle()))
                         {
-                            LOG_ERROR("Certificate verification failed: %s",
-                                      X509_verify_cert_error_string(verify_result));
-                            connection_context_->on_error(asio::error::no_recovery,
-                                                          "Certificate verification failed");
+                            LOG_ERROR("No certificate was presented by the server");
+                            connection_context_->on_error(asio::error::no_recovery, "No server certificate");
                             close();
                             return;
-                        } else
+                        }
+                        long verify_result = SSL_get_verify_result(ssl_stream_->native_handle());
+                        if (verify_result != X509_V_OK)
                         {
-                            LOG_WARNING("Allowing self-signed certificate");
+                            if (!(allow_self_signed_ && verify_result == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT))
+                            {
+                                LOG_ERROR("Certificate verification failed: %s",
+                                          X509_verify_cert_error_string(verify_result));
+                                connection_context_->on_error(asio::error::no_recovery,
+                                                              "Certificate verification failed");
+                                close();
+                                return;
+                            } else
+                            {
+                                LOG_WARNING("Allowing self-signed certificate");
+                            }
                         }
                     }
+                    connection_context_->on_connect();
+                    do_read();
+                } else
+                {
+                    connection_context_ = context_template->create_instance();
+                    connection_context_->set_session(this->weak_from_this());
+                    LOG_ERROR("SSL handshake failed: %s", ec.message().c_str());
+                    char error_buffer[256];
+                    ERR_error_string_n(ERR_get_error(), error_buffer, sizeof(error_buffer));
+                    LOG_ERROR("OpenSSL Error: %s", error_buffer);
+                    connection_context_->on_error(ec, "SSL handshake failed");
+                    close();
                 }
-                connection_context_->on_connect();
-                do_read();
-
-            } else
-            {
-                LOG_ERROR("SSL handshake failed: %s", ec.message().c_str());
-                char error_buffer[256];
-                ERR_error_string_n(ERR_get_error(), error_buffer, sizeof(error_buffer));
-                LOG_ERROR("OpenSSL Error: %s", error_buffer);
-                connection_context_->on_error(ec, "SSL handshake failed");
-                close();
-            }
-        }));
+            }));
 }
 
 void NetworkSession::do_read()
@@ -326,105 +323,57 @@ void NetworkSession::process_read_data(const ByteVector &new_data)
     }
 }
 
-void NetworkSession::do_write(bool send_all_data_at_once_in_order_added)
+void NetworkSession::do_write()
 {
     if (is_closed())
     {
         return;
     }
 
-    if (send_all_data_at_once_in_order_added)
+    auto buffer = write_queue_.pop();
+    if (!buffer)
+    {
+        return;
+    }
+
+    auto write_handler = [this, self = this->shared_from_this(), buffer](
+        const asio::error_code &ec, std::size_t bytes_written)
+    {
+        buffer_pool_->release(*buffer);
+        if (connection_context_->has_write_completion_handler())
         {
-            if (bulk_send_buffer_.empty())
+            auto do_write_lambda = [this, self = this->shared_from_this()]()
             {
-                is_bulk_sending_.store(false);
-                return;
-            }
-
-            auto write_handler = [this, self = this->shared_from_this()](
-                const asio::error_code &ec, std::size_t bytes_written)
-            {
-                if (!ec)
-                {
-                    LOG_DEBUG("Wrote %zu bytes in bulk", bytes_written);
-                    bulk_send_buffer_.clear();
-                    is_bulk_sending_.store(false);
-
-                    // Check if there's more data to send
-                    if (!write_queue_.empty())
-                    {
-                        do_write(false);
-                    }
-                }
-                else if (ec != asio::error::operation_aborted)
-                {
-                    LOG_DEBUG("Error in bulk write: %s", ec.message().c_str());
-                    connection_context_->on_error(ec, "Bulk write operation failed");
-                    close();
-                }
+                do_write();
             };
-
-            if (is_ssl_)
+            connection_context_->write_completion_handler(ec, bytes_written, do_write_lambda);
+        } else
+        {
+            if (!ec)
             {
-                asio::async_write(*ssl_stream_, asio::buffer(bulk_send_buffer_),
-                                  asio::bind_executor(strand_, write_handler));
-            }
-            else
+                LOG_DEBUG("Wrote %zu bytes", bytes_written);
+                if (!write_queue_.empty())
+                {
+                    do_write();
+                }
+            } else if (ec != asio::error::operation_aborted)
             {
-                asio::async_write(std::get<asio::ip::tcp::socket>(socket_), asio::buffer(bulk_send_buffer_),
-                                  asio::bind_executor(strand_, write_handler));
+                LOG_DEBUG("Error in write: %s", ec.message().c_str());
+                connection_context_->on_error(ec, "Write operation failed");
+                close();
             }
         }
-        else
-        {
-            auto buffer = write_queue_.pop();
-            if (!buffer)
-            {
-                return;
-            }
+    };
 
-            auto write_handler = [this, self = this->shared_from_this(), buffer](
-                const asio::error_code &ec, std::size_t bytes_written)
-            {
-                buffer_pool_->release(*buffer);
-                if (connection_context_->has_write_completion_handler())
-                {
-                    auto do_write_lambda = [this, self = this->shared_from_this()]()
-                    {
-                        do_write(false);
-                    };
-                    connection_context_->write_completion_handler(ec, bytes_written, do_write_lambda);
-                }
-                else
-                {
-                    if (!ec)
-                    {
-                        LOG_DEBUG("Wrote %zu bytes", bytes_written);
-                        if (!write_queue_.empty())
-                        {
-                            do_write(false);
-                        }
-                    }
-                    else if (ec != asio::error::operation_aborted)
-                    {
-                        LOG_DEBUG("Error in write: %s", ec.message().c_str());
-                        connection_context_->on_error(ec, "Write operation failed");
-                        close();
-                    }
-                }
-            };
-
-            if (is_ssl_)
-            {
-                asio::async_write(*ssl_stream_, asio::buffer(**buffer),
-                                  asio::bind_executor(strand_, write_handler));
-            }
-            else
-            {
-                asio::async_write(std::get<asio::ip::tcp::socket>(socket_), asio::buffer(**buffer),
-                                  asio::bind_executor(strand_, write_handler));
-            }
-        }
+    if (is_ssl_)
+    {
+        asio::async_write(*ssl_stream_, asio::buffer(**buffer),
+                          asio::bind_executor(strand_, write_handler));
+    } else
+    {
+        asio::async_write(std::get<asio::ip::tcp::socket>(socket_), asio::buffer(**buffer),
+                          asio::bind_executor(strand_, write_handler));
+    }
 }
 
 void NetworkSession::do_send()

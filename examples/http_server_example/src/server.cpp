@@ -22,7 +22,6 @@ int main() {
         std::string content = "<html><body><h1>Welcome to the HTTP Server</h1></body></html>";
         response.body().setContent(content);
         response.header().addField("Content-Type", "text/html");
-        response.header().addField("Content-Length", std::to_string(content.length()));
     });
 
     route->addMiddleware(std::make_shared<LoggingMiddleware>(), MiddlewareType::PRE_HANDLER);
@@ -36,7 +35,7 @@ int main() {
 
         response.body().setContent(content);
         response.header().addField("Content-Type", "text/plain");
-        response.header().addField("Content-Length", std::to_string(content.length()));
+
     });
     route2->addMiddleware(std::make_shared<LoggingMiddleware>(), MiddlewareType::PRE_HANDLER);
 
@@ -49,7 +48,6 @@ int main() {
         std::string response_string = oss.str();
         response.body().setContent(response_string);
         response.header().addField("Content-Type", "text/plain");
-        response.header().addField("Content-Length", std::to_string(response_string.length()));
     });
     route3->addMiddleware(std::make_shared<LoggingMiddleware>(), MiddlewareType::PRE_HANDLER);
 
@@ -71,7 +69,6 @@ int main() {
         std::string response_string = oss.str();
         response.body().setContent(response_string);
         response.header().addField("Content-Type", "text/plain");
-        response.header().addField("Content-Length", std::to_string(response_string.length()));
     });
     route4->addMiddleware(std::make_shared<LoggingMiddleware>(), MiddlewareType::PRE_HANDLER);
 

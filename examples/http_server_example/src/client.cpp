@@ -9,7 +9,7 @@ int main() {
     HttpClient client(io_context, "", true);
 
     // GET request
-    auto future_get = client.get("https://google.de");
+    auto future_get = client.get("https://localhost/");
     io_context.run();
     HttpResponse response_get = future_get.get();
     std::cout << "GET Response: " << response_get.toString() << std::endl;

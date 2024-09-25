@@ -2,6 +2,8 @@
 // Created by maxim on 24.09.2024.
 //
 #pragma once
+#include <HttpRequest.h>
+#include <HttpResponse.h>
 #include <SessionContext.h>
 
 class SessionContextTemplate
@@ -16,7 +18,7 @@ public:
     using CheckMessageState = SessionContext::CheckMessageState;
     using ReadCompletionHandler = SessionContext::ReadCompletionHandler;
     using WriteCompletionHandler = SessionContext::WriteCompletionHandler;
-
+    using RequestHandler = std::function<void(const HttpRequest &request, HttpResponse &response)>;
     SessionContextTemplate();
 
     // Setters for all properties
@@ -38,6 +40,8 @@ public:
 
     void set_write_completion_handler(WriteCompletionHandler handler);
 
+    void set_http2_request_handler(RequestHandler handler);
+
     void set_http2(bool is_http2);
 
     [[nodiscard]] bool is_http2() const;
@@ -56,4 +60,5 @@ private:
     CheckMessageState message_state_check_{};
     ReadCompletionHandler read_completion_handler_{};
     WriteCompletionHandler write_completion_handler_{};
+    RequestHandler request_handler_{};
 };

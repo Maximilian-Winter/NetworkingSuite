@@ -29,13 +29,14 @@ public:
         logger.addDestination(std::make_shared<AsyncLogger::FileDestination>(log_file, log_file_size_in_mb * (1024 * 1024)));
     }
 
-    void addTcpPort(unsigned short port_number, const std::shared_ptr<SessionContextTemplate>& connection_context_template) {
+    std::shared_ptr<TcpPort> addTcpPort(unsigned short port_number, const std::shared_ptr<SessionContextTemplate>& connection_context_template) {
         auto tcp_port = std::make_shared<TcpPort>(thread_pool_->get_io_context(), port_number, connection_context_template);
         ports_.push_back(tcp_port);
+        return tcp_port;
     }
 
 
-    void addSslTcpPort(unsigned short port_number, const std::string& ssl_cert_file, const std::string& ssl_key_file, const std::string& ssl_dh_file, std::shared_ptr<SessionContextTemplate> connection_context_template) {
+    std::shared_ptr<TcpPort> addSslTcpPort(unsigned short port_number, const std::string& ssl_cert_file, const std::string& ssl_key_file, const std::string& ssl_dh_file, std::shared_ptr<SessionContextTemplate> connection_context_template) {
         ssl_contexts_.emplace_back(std::make_shared<asio::ssl::context>(asio::ssl::context::tls));
         ssl_contexts_.back()->set_options(
                         asio::ssl::context::default_workarounds
@@ -48,12 +49,15 @@ public:
         //ssl_contexts_.back()->use_tmp_dh_file(ssl_dh_file);
         auto tcp_port = std::make_shared<TcpPort>(thread_pool_->get_io_context(), port_number, connection_context_template, ssl_contexts_.back().get());
         ports_.push_back(tcp_port);
+
+        return tcp_port;
     }
 
     template< typename SenderFramingType, typename ReceiverFramingType>
-    void addUdpPort(unsigned short port_number, std::shared_ptr<SessionContext>& connection_context) {
+    std::shared_ptr<UdpPort> addUdpPort(unsigned short port_number, std::shared_ptr<SessionContext>& connection_context) {
         auto udp_port = std::make_shared<UdpPort<SenderFramingType, ReceiverFramingType>>(thread_pool_->get_io_context(), port_number,connection_context);
         ports_.push_back(udp_port);
+        return udp_port;
     }
 
     void start() {
@@ -75,7 +79,7 @@ private:
                                         unsigned char *outlen, const unsigned char *in,
                                         unsigned int inlen, void *arg)
     {
-        int rv = nghttp2_select_next_protocol((unsigned char **) out, outlen, in, inlen);
+        int rv = nghttp2_select_alpn(out, outlen, in, inlen);
         if (rv != 1)
         {
             return SSL_TLSEXT_ERR_NOACK;

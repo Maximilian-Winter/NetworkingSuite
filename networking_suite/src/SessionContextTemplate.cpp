@@ -35,23 +35,28 @@ void SessionContextTemplate::set_write_completion_handler(WriteCompletionHandler
     write_completion_handler_ = std::move(handler);
 }
 
-void SessionContextTemplate::set_http2(bool is_http2)
-{ is_http2_ = is_http2; }
+void SessionContextTemplate::set_http2_request_handler(RequestHandler handler)
+{
+    request_handler_ = std::move(handler);
+}
+
+void SessionContextTemplate::set_http2(bool use_http2)
+{ this->is_http2_ = use_http2; }
 
 bool SessionContextTemplate::is_http2() const
 { return is_http2_; }
 
 std::unique_ptr<SessionContext> SessionContextTemplate::create_instance() const
 {
-    std::unique_ptr<SessionContext> context = nullptr;
+
     if (is_http2_)
     {
-        context = std::make_unique<Http2SessionContext>();
-    } else
-    {
-        context = std::make_unique<SessionContext>();
+         std::unique_ptr<Http2SessionContext> context_ = std::make_unique<Http2SessionContext>();
+        context_->set_request_handler(request_handler_);
+        return std::move(context_);
     }
-
+    std::unique_ptr<SessionContext> context = nullptr;
+    context = std::make_unique<SessionContext>();
     if (connected_callback_) context->set_connected_callback(connected_callback_);
     if (closed_callback_) context->set_closed_callback(closed_callback_);
     if (error_handler_) context->set_error_handler(error_handler_);

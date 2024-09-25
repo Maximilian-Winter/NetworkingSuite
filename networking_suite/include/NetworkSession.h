@@ -11,7 +11,7 @@ typedef __int64 ssize_t;
 #else
 #include <unistd.h>
 #endif
-#define DEBUGBUILD
+
 #include <nghttp2/nghttp2.h>
 
 #include "BufferPool.h"
@@ -53,8 +53,7 @@ private:
     asio::ip::udp::endpoint udp_endpoint_;
     asio::ip::udp::resolver udp_resolver_;
     asio::ssl::context *ssl_context_;
-    ByteVector bulk_send_buffer_;
-    std::atomic<bool> is_bulk_sending_{false};
+
 public:
     // Constructor for new connections
     explicit NetworkSession(asio::io_context &io_context, ProtocolType protocol_type,
@@ -91,7 +90,7 @@ public:
 
     std::string getSessionUuid() const;
 
-    void write(const ByteVector &message, bool send_all_data_at_once_in_order_added = false, bool write_immediately = false);
+    void write(const ByteVector &message, bool write_immediately = false);
 
     void close();
 
@@ -104,7 +103,7 @@ private:
 
     void process_read_data(const ByteVector &new_data);
 
-    void do_write(bool send_all_data_at_once_in_order_added = false);
+    void do_write();
 
     void do_send();
 
@@ -116,6 +115,22 @@ private:
 
     void finish_close();
 
+    bool isHttp2Connection() const
+    {
+        if(session_role_ == SessionRole::CLIENT)
+        {
+            return false;
+        }
+        if (!this->is_ssl_stream())
+        {
+            return false;
+        }
+
+        const unsigned char *alpn = nullptr;
+        unsigned int alpnlen = 0;
+        SSL_get0_alpn_selected(this->ssl_stream().native_handle(), &alpn, &alpnlen);
+        return (alpn && alpnlen == 2 && memcmp("h2", alpn, 2) == 0);
+    }
 public:
     static std::shared_ptr<NetworkSession> connect_tcp(
         asio::io_context &io_context,

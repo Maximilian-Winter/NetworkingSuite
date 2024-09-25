@@ -13,6 +13,8 @@
 #include <Config.h>
 #include <functional>
 #include <future>
+#include <Logger.h>
+
 #include "NetworkSession.h"
 #include "HttpRequest.h"
 #include "HttpResponse.h"
@@ -53,14 +55,14 @@ private:
     std::unique_ptr<asio::ssl::context> ssl_context_;
     asio::io_context& io_context_;
     HttpMessageFraming message_framing_;
-    SessionContext<NetworkSession<HttpMessageFraming, HttpMessageFraming>, HttpMessageFraming, HttpMessageFraming> context_;
-    std::shared_ptr<NetworkSession<HttpMessageFraming, HttpMessageFraming>> session_;
+    std::shared_ptr<SessionContextTemplate> context_;
+    std::shared_ptr<NetworkSession> session_;
 };
 
 inline HttpClient::HttpClient(asio::io_context& io_context, const std::string& cert_file , bool allow_self_signed)
         : ssl_context_(std::make_unique<asio::ssl::context>(asio::ssl::context::tls_client)),
           io_context_(io_context),
-          allow_self_signed_(allow_self_signed)
+          allow_self_signed_(allow_self_signed), context_(std::make_shared<SessionContextTemplate>())
 {
     AsyncLogger& logger = AsyncLogger::getInstance();
     logger.setLogLevel(AsyncLogger::parseLogLevel("ERROR"));
@@ -100,7 +102,7 @@ inline std::future<HttpResponse> HttpClient::get(const std::string& url, const s
     parseUrl(url, host, port, path);
 
     request.setPath(path);
-    request.setHttpVersion("HTTP/1.1");
+    request.setHttpVersion("HTTP/2");
     request.header().addField("Host", host);
 
     for (const auto& [key, value] : headers) {
@@ -232,28 +234,48 @@ inline std::future<HttpResponse> HttpClient::sendRequest(const std::string& url,
 
     bool is_https = (port == "443");
 
-    context_.set_message_framing_sender(message_framing_);
-    context_.set_message_framing_receiver(message_framing_);
+    context_->set_read_postprocessor([this](ByteVector & byte_vector)
+    {
+        return message_framing_.extract_next_message(byte_vector);
+    });
+    context_->set_write_preprocessor([this](const ByteVector & byte_vector)
+    {
+        return message_framing_.frame_message(byte_vector);
+    });
+    context_->set_check_message_state([this](const ByteVector & byte_vector)
+    {
+        return message_framing_.check_message_state(byte_vector);
+    });
 
-    context_.set_connected_callback([request](const std::shared_ptr<NetworkSession<HttpMessageFraming, HttpMessageFraming>>& session) {
+    context_->set_connected_callback([request](const std::shared_ptr<NetworkSession>& session) {
         std::string request_string = request.toString();
         session->write(ByteVector(request_string.begin(), request_string.end()));
     });
 
-    context_.set_message_handler([promise](const std::shared_ptr<NetworkSession<HttpMessageFraming, HttpMessageFraming>>& session, const ByteVector& data) {
+    context_->set_message_handler([promise](const std::shared_ptr<NetworkSession>& session, const ByteVector& data) {
         const HttpResponse response = HttpParser::parseResponse(data);
         promise->set_value(response);
         session->close();
     });
-
-    session_ = NetworkSession<HttpMessageFraming, HttpMessageFraming>::connect_tcp(
+    // Set up ALPN for HTTP/2
+    SSL_CTX_set_alpn_protos(ssl_context_->native_handle(),
+                            reinterpret_cast<const unsigned char*>("\x02h2"), 3);
+    session_ = NetworkSession::connect_tcp(
         io_context_,
         host,
         port,
         context_,
         is_https ? ssl_context_.get() : nullptr
     );
-
+    const unsigned char* alpn_data = nullptr;
+    unsigned int alpn_len = 0;
+    SSL_get0_alpn_selected(session_->ssl_stream().native_handle(), &alpn_data, &alpn_len);
+    if (alpn_data && alpn_len == 2 && std::string(reinterpret_cast<const char*>(alpn_data), alpn_len) == "h2") {
+        std::cout << "HTTP/2 negotiated successfully\n";
+        // Here you would start your HTTP/2 communication
+    } else {
+        std::cout << "Failed to negotiate HTTP/2\n";
+    }
     return future;
 }
 
